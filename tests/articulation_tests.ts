@@ -28,6 +28,7 @@ const ArticulationTests = {
     run('Bounding Box', verticalPlacement, { drawBoundingBox: true });
     run('Vertical Placement', verticalPlacement, { drawBoundingBox: false });
     run('Vertical Placement (Glyph codes)', verticalPlacement2);
+    run('Origin remains stable after positioning', originRemainsStable);
     run('Staccato/Staccatissimo', drawArticulations, { sym1: 'a.', sym2: 'av' });
     run('Accent/Tenuto', drawArticulations, { sym1: 'a>', sym2: 'a-' });
     run('Marcato/L.H. Pizzicato', drawArticulations, { sym1: 'a^', sym2: 'a+' });
@@ -41,6 +42,27 @@ const ArticulationTests = {
     run('TabNote Articulation', tabNotes, { sym1: 'a.', sym2: 'a.' });
   },
 };
+
+function originRemainsStable(options: TestOptions): void {
+  const articulation = new Articulation('a.');
+  articulation.setOrigin(0.5, 1);
+  const initialXShift = articulation.getXShift();
+  const initialYShift = articulation.getYShift();
+
+  articulation.setX(240).setY(160);
+  articulation.setOrigin(0.5, 1);
+
+  options.assert.strictEqual(
+    articulation.getXShift(),
+    initialXShift,
+    'The glyph origin does not absorb the previous rendered x coordinate.'
+  );
+  options.assert.strictEqual(
+    articulation.getYShift(),
+    initialYShift,
+    'The glyph origin does not absorb the previous rendered y coordinate.'
+  );
+}
 
 // Helper function for creating StaveNotes.
 function drawArticulations(options: TestOptions): void {
