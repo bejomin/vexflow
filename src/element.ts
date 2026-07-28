@@ -671,14 +671,17 @@ export class Element {
 
   setOriginX(x: number): void {
     const bbox = this.getBoundingBox();
-    const originX = Math.abs((bbox.getX() - this.xShift) / bbox.getW());
+    // getBoundingBox() is expressed in rendered coordinates. Remove both the
+    // element position and its current shift so repeated origin updates remain
+    // relative to the glyph's own bounds.
+    const originX = Math.abs((bbox.getX() - this.x - this.xShift) / bbox.getW());
     const xShift = (x - originX) * bbox.getW();
     this.xShift = -xShift;
   }
 
   setOriginY(y: number): void {
     const bbox = this.getBoundingBox();
-    const originY = Math.abs((bbox.getY() - this.yShift) / bbox.getH());
+    const originY = Math.abs((bbox.getY() - this.y - this.yShift) / bbox.getH());
     const yShift = (y - originY) * bbox.getH();
     this.yShift = -yShift;
   }
