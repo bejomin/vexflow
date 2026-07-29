@@ -764,6 +764,22 @@ export class Formatter {
                 maxNegativeShiftPx = Math.min(maxNegativeShiftPx, insideLeftEdge - insideRightEdge);
               });
 
+              // Preserve the full shared-column boundary established by TickContext.preFormat().
+              // The per-voice checks above protect drawable noteheads and modifiers, but layout-only
+              // padding may originate from a different tickable in either shared context. Without
+              // this adjacent-context bound, softmax justification can reclaim that clearance.
+              const contextMetrics = context.getMetrics();
+              const prevContextMetrics = prevContext.getMetrics();
+              if (contextMetrics.layoutPaddingLeftPx > 0 || prevContextMetrics.layoutPaddingRightPx > 0) {
+                const adjacentInsideLeftEdge = context.getX() - contextMetrics.totalLeftPx;
+                const adjacentInsideRightEdge =
+                  prevContext.getX() + prevContextMetrics.notePx + prevContextMetrics.totalRightPx;
+                maxNegativeShiftPx = Math.min(
+                  maxNegativeShiftPx,
+                  Math.max(0, adjacentInsideLeftEdge - adjacentInsideRightEdge)
+                );
+              }
+
               // Don't shift further left than the notehead of the last context. Actually, stay at most 5% to the right
               // so that two different tick contexts don't align across staves.
               maxNegativeShiftPx = Math.min(
