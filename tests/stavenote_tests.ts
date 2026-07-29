@@ -397,6 +397,29 @@ function directionalLayoutPadding(assert: Assert): void {
     baselineBoundingBox.getW(),
     'layout-only padding does not widen the drawable bounding box'
   );
+
+  const notes = [
+    new StaveNote({ keys: ['c/4'], duration: 'q' }).setStave(stave).setLayoutPadding(0, 120),
+    new StaveNote({ keys: ['d/4'], duration: 'q' }).setStave(stave),
+    new StaveNote({ keys: ['e/4'], duration: 'q' }).setStave(stave),
+    new StaveNote({ keys: ['f/4'], duration: 'q' }).setStave(stave),
+  ];
+  const voice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables(notes);
+  const formatter = new Formatter().joinVoices([voice]);
+  const minimumWidth = formatter.preCalculateMinTotalWidth([voice]);
+  formatter.format([voice], minimumWidth);
+  const justifiedContexts = formatter.getTickContexts()!.array;
+  const firstJustifiedMetrics = justifiedContexts[0].getMetrics();
+  const secondJustifiedMetrics = justifiedContexts[1].getMetrics();
+  const finalGap =
+    justifiedContexts[1].getX() -
+    secondJustifiedMetrics.totalLeftPx -
+    (justifiedContexts[0].getX() + firstJustifiedMetrics.notePx + firstJustifiedMetrics.totalRightPx);
+
+  assert.ok(
+    finalGap >= -0.001,
+    `softmax justification preserves layout-only clearance (final gap ${finalGap.toFixed(3)}px)`
+  );
 }
 
 function drawBasic(options: TestOptions, contextBuilder: ContextBuilder): void {
