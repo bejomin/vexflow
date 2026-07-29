@@ -44,6 +44,8 @@ class MockTickable extends Tickable {
       width: 0,
       glyphWidth: 0,
       notePx: this.width,
+      layoutPaddingLeftPx: 0,
+      layoutPaddingRightPx: 0,
       modLeftPx: 0,
       modRightPx: 0,
       leftDisplacedHeadPx: 0,

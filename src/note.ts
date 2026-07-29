@@ -40,6 +40,10 @@ export interface NoteMetrics {
   glyphWidth?: number;
   /** The width of the note head only. */
   notePx: number;
+  /** Layout-only clearance before the rhythmic column. */
+  layoutPaddingLeftPx: number;
+  /** Layout-only clearance after the rhythmic column. */
+  layoutPaddingRightPx: number;
   /** Start `X` for left modifiers. */
   modLeftPx: number;
   /** Start `X` for right modifiers. */
@@ -258,6 +262,8 @@ export abstract class Note extends Tickable {
     strokePx: number;
   };
   protected duration: string;
+  protected layoutPaddingLeftPx: number;
+  protected layoutPaddingRightPx: number;
   protected leftDisplacedHeadPx: number;
   protected rightDisplacedHeadPx: number;
   protected noteType: string;
@@ -317,6 +323,8 @@ export abstract class Note extends Tickable {
 
     // Positioning variables
     this.width = 0; // Width in pixels calculated after preFormat
+    this.layoutPaddingLeftPx = 0;
+    this.layoutPaddingRightPx = 0;
     this.leftDisplacedHeadPx = 0; // Extra room on left for displaced note head
     this.rightDisplacedHeadPx = 0; // Extra room on right for displaced note head
     this.xShift = 0; // X shift from tick context X
@@ -619,6 +627,8 @@ export abstract class Note extends Tickable {
       width,
       glyphWidth,
       notePx,
+      layoutPaddingLeftPx: this.layoutPaddingLeftPx,
+      layoutPaddingRightPx: this.layoutPaddingRightPx,
 
       // Modifier spacing.
       modLeftPx,
@@ -628,6 +638,29 @@ export abstract class Note extends Tickable {
       leftDisplacedHeadPx: this.leftDisplacedHeadPx,
       rightDisplacedHeadPx: this.rightDisplacedHeadPx,
       glyphPx: 0,
+    };
+  }
+
+  /**
+   * Add directional clearance used only by the formatter.
+   *
+   * Layout padding contributes to the shared rhythmic column's extents, but is
+   * deliberately excluded from this note's drawable width and bounding box.
+   */
+  setLayoutPadding(leftPx: number, rightPx: number): this {
+    if (!Number.isFinite(leftPx) || leftPx < 0 || !Number.isFinite(rightPx) || rightPx < 0) {
+      throw new RuntimeError('BadArgument', 'Layout padding must contain finite non-negative values.');
+    }
+    this.layoutPaddingLeftPx = leftPx;
+    this.layoutPaddingRightPx = rightPx;
+    this.preFormatted = false;
+    return this;
+  }
+
+  getLayoutPadding(): { leftPx: number; rightPx: number } {
+    return {
+      leftPx: this.layoutPaddingLeftPx,
+      rightPx: this.layoutPaddingRightPx,
     };
   }
 
