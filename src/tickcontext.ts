@@ -39,6 +39,8 @@ export class TickContext {
   protected xOffset: number;
   protected notePx: number;
   protected glyphPx: number;
+  protected layoutPaddingLeftPx: number;
+  protected layoutPaddingRightPx: number;
   protected leftDisplacedHeadPx: number;
   protected rightDisplacedHeadPx: number;
   protected modLeftPx: number;
@@ -84,6 +86,8 @@ export class TickContext {
     // Formatting metrics
     this.notePx = 0; // width of widest note in this context
     this.glyphPx = 0; // width of glyph (note head)
+    this.layoutPaddingLeftPx = 0;
+    this.layoutPaddingRightPx = 0;
     this.leftDisplacedHeadPx = 0; // Extra left pixels for displaced notes
     this.rightDisplacedHeadPx = 0; // Extra right pixels for displaced notes
     this.modLeftPx = 0; // Left modifier pixels
@@ -186,6 +190,8 @@ export class TickContext {
       width,
       glyphPx,
       notePx,
+      layoutPaddingLeftPx,
+      layoutPaddingRightPx,
       leftDisplacedHeadPx,
       rightDisplacedHeadPx,
       modLeftPx,
@@ -197,6 +203,8 @@ export class TickContext {
       width, // Width of largest tickable in context
       glyphPx, // Width of largest glyph (note head)
       notePx, // Width of notehead + stem
+      layoutPaddingLeftPx,
+      layoutPaddingRightPx,
       leftDisplacedHeadPx, // Left modifiers
       rightDisplacedHeadPx, // Right modifiers
       modLeftPx,
@@ -262,13 +270,23 @@ export class TickContext {
       // Maintain the widest note head
       this.glyphPx = Math.max(this.glyphPx, metrics.glyphWidth ?? 0);
 
+      // Maintain layout-only clearance requested by any tickable in this shared column.
+      this.layoutPaddingLeftPx = Math.max(this.layoutPaddingLeftPx, metrics.layoutPaddingLeftPx);
+      this.layoutPaddingRightPx = Math.max(this.layoutPaddingRightPx, metrics.layoutPaddingRightPx);
+
       // Total modifier shift
       this.modLeftPx = Math.max(this.modLeftPx, metrics.modLeftPx);
       this.modRightPx = Math.max(this.modRightPx, metrics.modRightPx);
 
       // Total shift
-      this.totalLeftPx = Math.max(this.totalLeftPx, metrics.modLeftPx + metrics.leftDisplacedHeadPx);
-      this.totalRightPx = Math.max(this.totalRightPx, metrics.modRightPx + metrics.rightDisplacedHeadPx);
+      this.totalLeftPx = Math.max(
+        this.totalLeftPx,
+        metrics.layoutPaddingLeftPx + metrics.modLeftPx + metrics.leftDisplacedHeadPx
+      );
+      this.totalRightPx = Math.max(
+        this.totalRightPx,
+        metrics.layoutPaddingRightPx + metrics.modRightPx + metrics.rightDisplacedHeadPx
+      );
 
       // Recalculate the tick context total width
       this.width = this.notePx + this.totalLeftPx + this.totalRightPx;

@@ -28,6 +28,7 @@ import { Stem } from '../src/stem';
 import { StringNumber } from '../src/stringnumber';
 import { Stroke } from '../src/strokes';
 import { TickContext } from '../src/tickcontext';
+import { Voice } from '../src/voice';
 
 const StaveNoteTests = {
   Start(): void {
@@ -41,6 +42,7 @@ const StaveNoteTests = {
     QUnit.test('StaveLine', staveLine);
     QUnit.test('Width', width);
     QUnit.test('TickContext', tickContext);
+    QUnit.test('Directional layout padding', directionalLayoutPadding);
 
     const run = VexFlowTests.runTests;
     run('StaveNote Draw - Treble', drawBasic, { clef: 'treble', octaveShift: 0, restKey: 'r/4' });
@@ -338,6 +340,63 @@ function tickContext(assert: Assert): void {
   new TickContext().addTickable(note).preFormat().setX(10).setPadding(0);
 
   assert.expect(0);
+}
+
+function directionalLayoutPadding(assert: Assert): void {
+  const stave = new Stave(10, 10, 400);
+  const createPair = (leftPx = 0, rightPx = 0) => {
+    const first = new StaveNote({ keys: ['c/4'], duration: 'q' }).setStave(stave).setLayoutPadding(leftPx, rightPx);
+    const second = new StaveNote({ keys: ['d/4'], duration: 'q' }).setStave(stave);
+    const voice = new Voice({ numBeats: 2, beatValue: 4 }).addTickables([first, second]);
+    const formatter = new Formatter().joinVoices([voice]).format([voice], 0);
+    const contexts = formatter.getTickContexts()!.array;
+    return {
+      first,
+      firstContext: contexts[0],
+      secondContext: contexts[1],
+    };
+  };
+
+  const baseline = createPair();
+  const padded = createPair(7, 13);
+  const baselineMetrics = baseline.firstContext.getMetrics();
+  const paddedMetrics = padded.firstContext.getMetrics();
+
+  assert.equal(
+    paddedMetrics.totalLeftPx - baselineMetrics.totalLeftPx,
+    7,
+    'left layout padding contributes to the shared tick context'
+  );
+  assert.equal(
+    paddedMetrics.totalRightPx - baselineMetrics.totalRightPx,
+    13,
+    'right layout padding contributes to the shared tick context'
+  );
+  assert.equal(
+    padded.secondContext.getX() - baseline.secondContext.getX(),
+    20,
+    'directional padding advances the following rhythmic column'
+  );
+  assert.equal(
+    padded.first.getMetrics().width,
+    baseline.first.getMetrics().width,
+    'layout-only padding does not change the drawable note width'
+  );
+
+  baseline.firstContext.setX(100);
+  padded.firstContext.setX(100);
+  const baselineBoundingBox = baseline.first.getBoundingBox();
+  const paddedBoundingBox = padded.first.getBoundingBox();
+  assert.equal(
+    paddedBoundingBox.getX(),
+    baselineBoundingBox.getX(),
+    'layout-only padding does not shift the drawable bounding box'
+  );
+  assert.equal(
+    paddedBoundingBox.getW(),
+    baselineBoundingBox.getW(),
+    'layout-only padding does not widen the drawable bounding box'
+  );
 }
 
 function drawBasic(options: TestOptions, contextBuilder: ContextBuilder): void {
