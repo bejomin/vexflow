@@ -43,6 +43,7 @@ const StaveNoteTests = {
     QUnit.test('Width', width);
     QUnit.test('TickContext', tickContext);
     QUnit.test('Directional layout padding', directionalLayoutPadding);
+    QUnit.test('Named layout padding', namedLayoutPadding);
 
     const run = VexFlowTests.runTests;
     run('StaveNote Draw - Treble', drawBasic, { clef: 'treble', octaveShift: 0, restKey: 'r/4' });
@@ -420,6 +421,91 @@ function directionalLayoutPadding(assert: Assert): void {
     finalGap >= -0.001,
     `softmax justification preserves layout-only clearance (final gap ${finalGap.toFixed(3)}px)`
   );
+
+  const modifierBaseline = new StaveNote({ keys: ['c/4'], duration: 'q' }).setStave(stave);
+  modifierBaseline.addModifier(new Accidental('b'), 0);
+  const baselineVoice = new Voice({ numBeats: 1, beatValue: 4 }).addTickable(modifierBaseline);
+  const baselineFormatter = new Formatter().joinVoices([baselineVoice]);
+  const baselineWidth = baselineFormatter.preCalculateMinTotalWidth([baselineVoice]);
+
+  const paddedWithModifier = new StaveNote({ keys: ['c/4'], duration: 'q' }).setStave(stave).setLayoutPadding(40, 25);
+  paddedWithModifier.addModifier(new Accidental('b'), 0);
+  const paddedVoice = new Voice({ numBeats: 1, beatValue: 4 }).addTickable(paddedWithModifier);
+  const paddedFormatter = new Formatter().joinVoices([paddedVoice]);
+  const paddedWidth = paddedFormatter.preCalculateMinTotalWidth([paddedVoice]);
+  const hardPaddingWidth = paddedFormatter.getMinTotalWidthLayoutPadding();
+
+  assert.equal(
+    paddedWidth - baselineWidth,
+    hardPaddingWidth,
+    'formatter reports the exact hard-padding contribution beyond drawable modifiers'
+  );
+}
+
+function namedLayoutPadding(assert: Assert): void {
+  const stave = new Stave(10, 10, 400);
+  const note = new StaveNote({ keys: ['c/4'], duration: 'q' }).setStave(stave).setLayoutPadding(4, 5);
+
+  note.setLayoutPaddingForSource('lyrics', 12, 3);
+  note.setLayoutPaddingForSource('rests', 7, 14);
+  assert.deepEqual(
+    note.getLayoutPadding(),
+    { leftPx: 12, rightPx: 14 },
+    'independent named sources and legacy padding combine by directional maximum'
+  );
+
+  note.clearLayoutPaddingForSource('lyrics');
+  assert.deepEqual(
+    note.getLayoutPadding(),
+    { leftPx: 7, rightPx: 14 },
+    'clearing one source restores the remaining named requirements'
+  );
+  note.clearLayoutPaddingForSource('rests');
+  assert.deepEqual(
+    note.getLayoutPadding(),
+    { leftPx: 4, rightPx: 5 },
+    'clearing every named source restores the compatibility-setter baseline'
+  );
+
+  const modified = new StaveNote({ keys: ['d/4'], duration: 'q' }).setStave(stave);
+  modified.addModifier(new Accidental('b'), 0);
+  modified.addToModifierContext(new ModifierContext());
+  const unmodified = new StaveNote({ keys: ['e/4'], duration: 'q' }).setStave(stave);
+  unmodified.addToModifierContext(new ModifierContext());
+  const context = new TickContext().addTickable(modified, 0).addTickable(unmodified, 1).preFormat();
+  const baseline = context.getMetrics();
+
+  context.applyLayoutPaddingForSource('constraint', 6, 9).preFormat();
+  const firstApplication = context.getMetrics();
+  assert.equal(
+    firstApplication.totalLeftPx - baseline.totalLeftPx,
+    6,
+    'effective-context left clearance is not masked by a modifier in another voice'
+  );
+  assert.equal(
+    firstApplication.totalRightPx - baseline.totalRightPx,
+    9,
+    'effective-context right clearance is added to the complete shared column'
+  );
+
+  context.applyLayoutPaddingForSource('constraint', 6, 9).preFormat();
+  assert.deepEqual(context.getMetrics(), firstApplication, 'reapplying the same named context clearance is idempotent');
+
+  context.applyLayoutPaddingForSource('constraint', 2, 3).preFormat();
+  const reduced = context.getMetrics();
+  assert.equal(
+    reduced.totalLeftPx - baseline.totalLeftPx,
+    2,
+    'reapplying a smaller left clearance recomputes and shrinks context geometry'
+  );
+  assert.equal(
+    reduced.totalRightPx - baseline.totalRightPx,
+    3,
+    'reapplying a smaller right clearance recomputes and shrinks context geometry'
+  );
+
+  context.clearLayoutPaddingForSource('constraint').preFormat();
+  assert.deepEqual(context.getMetrics(), baseline, 'clearing context clearance restores baseline geometry');
 }
 
 function drawBasic(options: TestOptions, contextBuilder: ContextBuilder): void {
