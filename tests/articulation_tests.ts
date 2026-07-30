@@ -31,6 +31,7 @@ const ArticulationTests = {
     run('Origin remains stable after positioning', originRemainsStable);
     run('Pre-draw selected notehead layout', selectedNoteheadPreDrawLayout);
     run('Final beam geometry precedes articulation layout', finalBeamGeometryLayout);
+    run('Notes without articulations leave beam geometry alone', noArticulationLayoutIsNoop);
     run('Outward displacement is absolute and idempotent', absoluteOutwardDisplacement);
     run('Staccato/Staccatissimo', drawArticulations, { sym1: 'a.', sym2: 'av' });
     run('Accent/Tenuto', drawArticulations, { sym1: 'a>', sym2: 'a-' });
@@ -130,6 +131,27 @@ function finalBeamGeometryLayout(options: TestOptions, contextBuilder: ContextBu
   const secondLayout = articulation.layout();
   assertClose(options, secondLayout.x, firstLayout.x, 're-finalizing the beam does not move articulation x');
   assertClose(options, secondLayout.y, firstLayout.y, 're-finalizing the beam does not move articulation y');
+}
+
+function noArticulationLayoutIsNoop(options: TestOptions, contextBuilder: ContextBuilder): void {
+  const ctx = contextBuilder(options.elementId, 420, 180);
+  const stave = new Stave(10, 40, 400).setContext(ctx);
+  const notes = [
+    new StaveNote({ keys: ['c/5'], duration: '8', stemDirection: Stem.UP }),
+    new StaveNote({ keys: ['g/5'], duration: '8', stemDirection: Stem.UP }),
+  ];
+  const beam = new Beam(notes);
+  formatNotesToStave(stave, notes, 2);
+
+  let postFormatCalls = 0;
+  const originalPostFormat = beam.postFormat.bind(beam);
+  beam.postFormat = (): void => {
+    postFormatCalls++;
+    originalPostFormat();
+  };
+
+  notes[0].layoutArticulations();
+  options.assert.strictEqual(postFormatCalls, 0, 'a note without articulations does not re-finalize its beam');
 }
 
 function absoluteOutwardDisplacement(options: TestOptions, contextBuilder: ContextBuilder): void {

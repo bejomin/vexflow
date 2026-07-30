@@ -375,10 +375,6 @@ export class Articulation extends Modifier {
     const { position, textLine } = this;
     const canSitBetweenLines = this.articulation.betweenLines;
 
-    if (isStemmableNote(note)) {
-      note.getBeam()?.postFormat();
-    }
-
     const stave = note.checkStave();
     const staffSpace = stave.getSpacingBetweenLines();
     const isTab = isTabNote(note);
