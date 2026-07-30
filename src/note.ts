@@ -264,6 +264,9 @@ export abstract class Note extends Tickable {
   protected duration: string;
   protected layoutPaddingLeftPx: number;
   protected layoutPaddingRightPx: number;
+  protected legacyLayoutPaddingLeftPx: number;
+  protected legacyLayoutPaddingRightPx: number;
+  protected readonly layoutPaddingBySource: Map<string, { leftPx: number; rightPx: number }>;
   protected leftDisplacedHeadPx: number;
   protected rightDisplacedHeadPx: number;
   protected noteType: string;
@@ -325,6 +328,9 @@ export abstract class Note extends Tickable {
     this.width = 0; // Width in pixels calculated after preFormat
     this.layoutPaddingLeftPx = 0;
     this.layoutPaddingRightPx = 0;
+    this.legacyLayoutPaddingLeftPx = 0;
+    this.legacyLayoutPaddingRightPx = 0;
+    this.layoutPaddingBySource = new Map();
     this.leftDisplacedHeadPx = 0; // Extra room on left for displaced note head
     this.rightDisplacedHeadPx = 0; // Extra room on right for displaced note head
     this.xShift = 0; // X shift from tick context X
@@ -646,15 +652,65 @@ export abstract class Note extends Tickable {
    *
    * Layout padding contributes to the shared rhythmic column's extents, but is
    * deliberately excluded from this note's drawable width and bounding box.
+   *
+   * This compatibility setter controls the note's unnamed padding requirement.
+   * Named requirements set with `setLayoutPaddingForSource()` are retained and
+   * combined with it using the maximum requirement in each direction.
    */
   setLayoutPadding(leftPx: number, rightPx: number): this {
+    this.validateLayoutPadding(leftPx, rightPx);
+    this.legacyLayoutPaddingLeftPx = leftPx;
+    this.legacyLayoutPaddingRightPx = rightPx;
+    this.recalculateLayoutPadding();
+    return this;
+  }
+
+  /**
+   * Set a named directional layout requirement.
+   *
+   * Independent sources combine by taking the maximum left and right
+   * requirement. Re-setting a source replaces its previous requirement.
+   */
+  setLayoutPaddingForSource(source: string, leftPx: number, rightPx: number): this {
+    this.validateLayoutPaddingSource(source);
+    this.validateLayoutPadding(leftPx, rightPx);
+    this.layoutPaddingBySource.set(source, { leftPx, rightPx });
+    this.recalculateLayoutPadding();
+    return this;
+  }
+
+  /** Remove a named directional layout requirement. */
+  clearLayoutPaddingForSource(source: string): this {
+    this.validateLayoutPaddingSource(source);
+    if (this.layoutPaddingBySource.delete(source)) {
+      this.recalculateLayoutPadding();
+    }
+    return this;
+  }
+
+  protected validateLayoutPadding(leftPx: number, rightPx: number): void {
     if (!Number.isFinite(leftPx) || leftPx < 0 || !Number.isFinite(rightPx) || rightPx < 0) {
       throw new RuntimeError('BadArgument', 'Layout padding must contain finite non-negative values.');
     }
+  }
+
+  protected validateLayoutPaddingSource(source: string): void {
+    if (typeof source !== 'string' || source.length === 0) {
+      throw new RuntimeError('BadArgument', 'Layout padding source must be a non-empty string.');
+    }
+  }
+
+  protected recalculateLayoutPadding(): void {
+    let leftPx = this.legacyLayoutPaddingLeftPx;
+    let rightPx = this.legacyLayoutPaddingRightPx;
+    this.layoutPaddingBySource.forEach((padding) => {
+      leftPx = Math.max(leftPx, padding.leftPx);
+      rightPx = Math.max(rightPx, padding.rightPx);
+    });
     this.layoutPaddingLeftPx = leftPx;
     this.layoutPaddingRightPx = rightPx;
     this.preFormatted = false;
-    return this;
+    this.tickContext?.invalidatePreFormat();
   }
 
   getLayoutPadding(): { leftPx: number; rightPx: number } {

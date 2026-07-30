@@ -503,6 +503,24 @@ export class Formatter {
     return this.minTotalWidth;
   }
 
+  /**
+   * Return the exact portion of the minimum width contributed by layout-only
+   * TickContext padding. Call after preCalculateMinTotalWidth() or format().
+   *
+   * Consumers can use this to keep hard engraving clearances separate from
+   * elastic rhythmic spacing.
+   */
+  getMinTotalWidthLayoutPadding(): number {
+    if (!this.hasMinTotalWidth) {
+      throw new RuntimeError(
+        'NoMinTotalWidth',
+        "Call 'preCalculateMinTotalWidth' or 'preFormat' before calling 'getMinTotalWidthLayoutPadding'"
+      );
+    }
+
+    return this.tickContexts?.array.reduce((width, context) => width + context.getLayoutPaddingWidth(), 0) ?? 0;
+  }
+
   /** Calculate the resolution multiplier for `voices`, which is the
    * least common multiple of all the voices' getResolutionMultiplier() results. */
   static getResolutionMultiplier(voices: Voice[]): number {

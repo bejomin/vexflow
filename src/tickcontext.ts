@@ -18,6 +18,21 @@ export interface TickContextOptions {
   tickID: number;
 }
 
+interface LayoutPaddingTickable {
+  getLayoutPadding(): { leftPx: number; rightPx: number };
+  setLayoutPaddingForSource(source: string, leftPx: number, rightPx: number): unknown;
+  clearLayoutPaddingForSource(source: string): unknown;
+}
+
+function isLayoutPaddingTickable(tickable: Tickable): tickable is Tickable & LayoutPaddingTickable {
+  const candidate = tickable as Tickable & Partial<LayoutPaddingTickable>;
+  return (
+    typeof candidate.getLayoutPadding === 'function' &&
+    typeof candidate.setLayoutPaddingForSource === 'function' &&
+    typeof candidate.clearLayoutPaddingForSource === 'function'
+  );
+}
+
 /**
  * TickContext formats abstract tickable objects, such as notes, chords, tabs, etc.
  *
@@ -45,6 +60,8 @@ export class TickContext {
   protected rightDisplacedHeadPx: number;
   protected modLeftPx: number;
   protected modRightPx: number;
+  protected totalLeftPxWithoutLayoutPadding: number;
+  protected totalRightPxWithoutLayoutPadding: number;
   protected totalLeftPx: number;
   protected totalRightPx: number;
   protected maxTickable?: Tickable;
@@ -92,6 +109,8 @@ export class TickContext {
     this.rightDisplacedHeadPx = 0; // Extra right pixels for displaced notes
     this.modLeftPx = 0; // Left modifier pixels
     this.modRightPx = 0; // Right modifier pixels
+    this.totalLeftPxWithoutLayoutPadding = 0;
+    this.totalRightPxWithoutLayoutPadding = 0;
     this.totalLeftPx = 0; // Total left pixels
     this.totalRightPx = 0; // Total right pixels
     this.tContexts = []; // Parent array of tick contexts
@@ -184,6 +203,37 @@ export class TickContext {
     return this.tickables.filter((tickable) => tickable.isCenterAligned());
   }
 
+  /**
+   * Add a named amount of effective clearance to both sides of this shared
+   * rhythmic column.
+   *
+   * The source is first removed from every layout-capable tickable. Its new
+   * requirement is then based on each tickable's remaining effective padding,
+   * which makes reapplication idempotent. Applying the delta to every voice
+   * also prevents another voice's wider modifier from masking the clearance.
+   */
+  applyLayoutPaddingForSource(source: string, leftDeltaPx: number, rightDeltaPx: number): this {
+    this.validateLayoutPaddingSource(source);
+    this.validateLayoutPaddingDelta(leftDeltaPx, rightDeltaPx);
+
+    const layoutTickables = this.tickables.filter(isLayoutPaddingTickable);
+    layoutTickables.forEach((tickable) => tickable.clearLayoutPaddingForSource(source));
+    layoutTickables.forEach((tickable) => {
+      const baseline = tickable.getLayoutPadding();
+      tickable.setLayoutPaddingForSource(source, baseline.leftPx + leftDeltaPx, baseline.rightPx + rightDeltaPx);
+    });
+    this.invalidatePreFormat();
+    return this;
+  }
+
+  /** Remove a named effective-context clearance from every capable tickable. */
+  clearLayoutPaddingForSource(source: string): this {
+    this.validateLayoutPaddingSource(source);
+    this.tickables.filter(isLayoutPaddingTickable).forEach((tickable) => tickable.clearLayoutPaddingForSource(source));
+    this.invalidatePreFormat();
+    return this;
+  }
+
   /** Gets widths context, note and left/right modifiers for formatting. */
   getMetrics(): TickContextMetrics {
     const {
@@ -214,13 +264,27 @@ export class TickContext {
     };
   }
 
+  /**
+   * Return the exact amount by which layout-only padding increased this
+   * context's minimum width. This excludes clearance already supplied by
+   * drawable modifiers or displaced noteheads.
+   */
+  getLayoutPaddingWidth(): number {
+    return (
+      this.totalLeftPx -
+      this.totalLeftPxWithoutLayoutPadding +
+      this.totalRightPx -
+      this.totalRightPxWithoutLayoutPadding
+    );
+  }
+
   getCurrentTick(): Fraction {
     return this.currentTick;
   }
 
   setCurrentTick(tick: Fraction): void {
     this.currentTick = tick;
-    this.preFormatted = false;
+    this.invalidatePreFormat();
   }
 
   addTickable(tickable: Tickable, voiceIndex?: number): this {
@@ -248,13 +312,14 @@ export class TickContext {
     tickable.setTickContext(this);
     this.tickables.push(tickable);
     this.tickablesByVoice[voiceIndex ?? 0] = tickable;
-    this.preFormatted = false;
+    this.invalidatePreFormat();
     return this;
   }
 
   preFormat(): this {
     if (this.preFormatted) return this;
 
+    this.resetPreFormatGeometry();
     for (let i = 0; i < this.tickables.length; ++i) {
       const tickable = this.tickables[i];
       tickable.preFormat();
@@ -279,6 +344,14 @@ export class TickContext {
       this.modRightPx = Math.max(this.modRightPx, metrics.modRightPx);
 
       // Total shift
+      this.totalLeftPxWithoutLayoutPadding = Math.max(
+        this.totalLeftPxWithoutLayoutPadding,
+        metrics.modLeftPx + metrics.leftDisplacedHeadPx
+      );
+      this.totalRightPxWithoutLayoutPadding = Math.max(
+        this.totalRightPxWithoutLayoutPadding,
+        metrics.modRightPx + metrics.rightDisplacedHeadPx
+      );
       this.totalLeftPx = Math.max(
         this.totalLeftPx,
         metrics.layoutPaddingLeftPx + metrics.modLeftPx + metrics.leftDisplacedHeadPx
@@ -292,7 +365,46 @@ export class TickContext {
       this.width = this.notePx + this.totalLeftPx + this.totalRightPx;
     }
 
+    this.preFormatted = true;
     return this;
+  }
+
+  /**
+   * Invalidate cached pre-format geometry. The next `preFormat()` starts from
+   * zeroed aggregates, so removing or reducing padding can shrink the context.
+   */
+  invalidatePreFormat(): this {
+    this.preFormatted = false;
+    this.postFormatted = false;
+    return this;
+  }
+
+  protected resetPreFormatGeometry(): void {
+    this.notePx = 0;
+    this.glyphPx = 0;
+    this.layoutPaddingLeftPx = 0;
+    this.layoutPaddingRightPx = 0;
+    this.leftDisplacedHeadPx = 0;
+    this.rightDisplacedHeadPx = 0;
+    this.modLeftPx = 0;
+    this.modRightPx = 0;
+    this.totalLeftPxWithoutLayoutPadding = 0;
+    this.totalRightPxWithoutLayoutPadding = 0;
+    this.totalLeftPx = 0;
+    this.totalRightPx = 0;
+    this.width = 0;
+  }
+
+  protected validateLayoutPaddingSource(source: string): void {
+    if (typeof source !== 'string' || source.length === 0) {
+      throw new RuntimeError('BadArgument', 'Layout padding source must be a non-empty string.');
+    }
+  }
+
+  protected validateLayoutPaddingDelta(leftDeltaPx: number, rightDeltaPx: number): void {
+    if (!Number.isFinite(leftDeltaPx) || leftDeltaPx < 0 || !Number.isFinite(rightDeltaPx) || rightDeltaPx < 0) {
+      throw new RuntimeError('BadArgument', 'Layout padding delta must contain finite non-negative values.');
+    }
   }
 
   postFormat(): this {
