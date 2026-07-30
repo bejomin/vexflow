@@ -1206,6 +1206,11 @@ export class StaveNote extends StemmableNote {
    * Safe to call repeatedly after horizontal formatting or stave changes.
    */
   layoutArticulations(): void {
+    const articulations = this.modifiers.filter((modifier) => modifier.getCategory() === Category.Articulation);
+    if (articulations.length === 0) {
+      return;
+    }
+
     const xBegin = this.getNoteHeadBeginX();
     this._noteHeads.forEach((notehead) => notehead.setX(xBegin));
 
@@ -1215,10 +1220,8 @@ export class StaveNote extends StemmableNote {
     }
     this.beam?.postFormat();
 
-    for (const modifier of this.modifiers) {
-      if (modifier.getCategory() === Category.Articulation) {
-        (modifier as Modifier & { layout(): unknown }).layout();
-      }
+    for (const modifier of articulations) {
+      (modifier as Modifier & { layout(): unknown }).layout();
     }
   }
 
