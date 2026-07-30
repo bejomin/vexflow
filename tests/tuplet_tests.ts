@@ -31,6 +31,7 @@ const TupletTests = {
     run('Nested Tuplets', nested);
     run('Nested Tuplets Only Tuplet Children', nestedChildren);
     run('Single Tuplets', single);
+    run('Repeated draw keeps text at the calculated position', repeatedDrawTextPosition);
   },
 };
 
@@ -45,6 +46,42 @@ const setStemDirection = set('stemDirection');
 const setStemUp = setStemDirection(Stem.UP);
 const setStemDown = setStemDirection(Stem.DOWN);
 const setDurationToQuarterNote = set('duration')('4');
+
+function repeatedDrawTextPosition(options: TestOptions): void {
+  const f = VexFlowTests.makeFactory(options, 400);
+  const stave = f.Stave({ x: 10, y: 10 });
+  const notes = [
+    { keys: ['g/4'], duration: '8' },
+    { keys: ['a/4'], duration: '8' },
+    { keys: ['b/4'], duration: '8' },
+  ].map(f.StaveNote.bind(f));
+  const tuplet = f.Tuplet({
+    notes,
+    options: { notesOccupied: 2, numNotes: 3, bracketed: false },
+  });
+  const voice = f.Voice().setStrict(false).addTickables(notes);
+  new Formatter().joinVoices([voice]).formatToStave([voice], stave);
+
+  const ctx = f.getContext();
+  const renderedTextX: number[] = [];
+  const originalFillText = ctx.fillText.bind(ctx);
+  ctx.fillText = (text: string, x: number, y: number): typeof ctx => {
+    renderedTextX.push(x);
+    return originalFillText(text, x, y);
+  };
+
+  f.draw();
+  options.assert.ok(renderedTextX.length > 0, 'the initial draw emits the tuplet-number glyph');
+  const initialX = renderedTextX[renderedTextX.length - 1];
+  renderedTextX.length = 0;
+
+  tuplet.setContext(ctx).draw();
+  options.assert.strictEqual(renderedTextX.length, 1, 'the redraw emits one tuplet-number glyph');
+  options.assert.ok(
+    Math.abs(renderedTextX[0] - initialX) <= 0.001,
+    'the stored absolute x is not added twice on redraw'
+  );
+}
 
 function aboveBounding(options: TestOptions): void {
   const f = VexFlowTests.makeFactory(options, 600);
