@@ -2,6 +2,7 @@
 // @author Larry Kuhns.
 // MIT License
 
+import { BoundingBox } from './boundingbox';
 import { Builder } from './easyscore';
 import { Glyphs } from './glyphs';
 import { Modifier } from './modifier';
@@ -19,6 +20,15 @@ export interface ArticulationStruct {
   aboveCode?: string;
   belowCode?: string;
   betweenLines: boolean;
+}
+
+export interface ArticulationLayout {
+  x: number;
+  y: number;
+  boundingBox: BoundingBox;
+  position: number;
+  index: number;
+  outwardShift: number;
 }
 
 // eslint-disable-next-line
@@ -180,6 +190,8 @@ export class Articulation extends Modifier {
   protected articulation: ArticulationStruct;
 
   protected heightShift = 0;
+  protected outwardShift = 0;
+  protected layoutResult?: ArticulationLayout;
   /**
    * FIXME:
    * Most of the complex formatting logic (ie: snapping to space) is
@@ -322,30 +334,61 @@ export class Articulation extends Modifier {
       this.articulation.code ||
       Glyphs.null;
     this.text = code;
+    this.layoutResult = undefined;
   }
 
   /** Set if articulation should be rendered between lines. */
   setBetweenLines(betweenLines = true): this {
     this.articulation.betweenLines = betweenLines;
+    this.layoutResult = undefined;
     return this;
   }
 
-  /** Render articulation in position next to note. */
-  override draw(): void {
-    const ctx = this.checkContext();
-    const note = this.checkAttachedNote();
-    this.setRendered();
+  /**
+   * Move the articulation away from the staff by an absolute number of pixels.
+   * Reapplying the same value is idempotent; callers never have to undo an old
+   * relative y-shift before recalculating slur clearance.
+   */
+  setOutwardShift(outwardShift: number): this {
+    if (!Number.isFinite(outwardShift) || outwardShift < 0) {
+      throw new RuntimeError('BadArguments', 'Articulation outward shift must be a finite non-negative number.');
+    }
+    this.outwardShift = outwardShift;
+    this.layoutResult = undefined;
+    return this;
+  }
 
+  getOutwardShift(): number {
+    return this.outwardShift;
+  }
+
+  /**
+   * Calculate final articulation geometry after note and beam formatting.
+   *
+   * This method is safe to call repeatedly. It derives x/y and origin from the
+   * current note geometry and the absolute outward shift instead of applying
+   * incremental changes to a previous render.
+   */
+  layout(): ArticulationLayout {
+    const note = this.checkAttachedNote();
     const index = this.checkIndex();
     const { position, textLine } = this;
     const canSitBetweenLines = this.articulation.betweenLines;
+
+    if (isStemmableNote(note)) {
+      note.getBeam()?.postFormat();
+    }
 
     const stave = note.checkStave();
     const staffSpace = stave.getSpacingBetweenLines();
     const isTab = isTabNote(note);
 
-    // Articulations are centered over/under the note head.
-    const { x } = note.getModifierStartXY(position, index);
+    // Articulations are centered over/under the selected note head, including
+    // displaced chord heads. Non-StaveNote types retain their native anchor.
+    let { x } = note.getModifierStartXY(position, index);
+    if (isStaveNote(note)) {
+      x = note.getSelectedNoteHeadBounds(index).centerX;
+    }
     const shouldSitOutsideStaff = !canSitBetweenLines || isTab;
 
     const initialOffset = getInitialOffset(note, position);
@@ -375,9 +418,43 @@ export class Articulation extends Modifier {
       y += Math.abs(snappedLine - articLine) * staffSpace * offsetDirection;
     }
 
+    y += this.outwardShift * (position === ABOVE ? -1 : 1);
+
     L(`Rendering articulation at (x: ${x}, y: ${y})`);
     this.x = x;
     this.y = y;
+    this.layoutResult = {
+      x,
+      y,
+      boundingBox: this.getBoundingBox().clone(),
+      position,
+      index,
+      outwardShift: this.outwardShift,
+    };
+    return this.getLayout();
+  }
+
+  /** Return a defensive copy of the most recently calculated geometry. */
+  getLayout(): ArticulationLayout {
+    if (!this.layoutResult) {
+      return this.layout();
+    }
+    return {
+      ...this.layoutResult,
+      boundingBox: this.layoutResult.boundingBox.clone(),
+    };
+  }
+
+  /** Render the already calculated articulation geometry. */
+  override draw(): void {
+    const ctx = this.checkContext();
+    // Legacy direct-draw clients may not run a formatter or the owning
+    // StaveNote layout. Keep that route functional, while normal formatted
+    // notes arrive here with final geometry.
+    if (!this.layoutResult) {
+      this.layout();
+    }
+    this.setRendered();
     this.renderText(ctx, 0, 0);
   }
 }

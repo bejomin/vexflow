@@ -171,7 +171,10 @@ export class ModifierContext {
     if (this.postFormatted) return;
     L('Postformatting ModifierContext');
 
-    // If post-formatting is required for an element, add more lines below.
+    // Finalize beams and stems. Articulation geometry is calculated by the
+    // owning layout once the notes have their final staves and beam extents;
+    // draw() retains a legacy fallback for direct clients.
     StaveNote.postFormat(this.getMembers(Category.StaveNote) as Note[]);
+    this.postFormatted = true;
   }
 }
