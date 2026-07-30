@@ -385,18 +385,17 @@ export class Tuplet extends Element {
 
     // draw ratio text (x:y)
     let currentX = notationStartX;
-    this.textElement.renderText(ctx, currentX, commonTextY);
-    // set text element proper x and y
     this.textElement.setX(currentX);
     this.textElement.setY(commonTextY);
+    this.textElement.renderText(ctx, 0, 0);
     currentX += ratioWidth + extraSpacing;
 
     // draw note glyph if wanted
     if (suffix) {
       const suffixY = commonTextY + suffixOffsetY;
-      this.suffixElement.renderText(ctx, currentX, suffixY);
       this.suffixElement.setX(currentX);
       this.suffixElement.setY(suffixY);
+      this.suffixElement.renderText(ctx, 0, 0);
       currentX += noteWidth;
     }
 
