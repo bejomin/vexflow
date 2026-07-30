@@ -1,6 +1,7 @@
 // Copyright (c) 2023-present VexFlow contributors: https://github.com/vexflow/vexflow/graphs/contributors
 // MIT License
 
+import { BoundingBox } from './boundingbox';
 import { ElementStyle } from './element';
 import { Note, NoteStruct } from './note';
 import { Stave } from './stave';
@@ -120,11 +121,30 @@ export class NoteHead extends Note {
     // to its tick context
     const x = !this.preFormatted ? this.x : super.getAbsoluteX();
 
-    // For a more natural displaced notehead, we adjust the displacement amount
-    // by half the stem width in order to maintain a slight overlap with the stem
-    const displacementStemAdjustment = Stem.WIDTH / 2;
+    return this.getRenderedX(x);
+  }
 
-    return x + (this.displaced ? (this.width - displacementStemAdjustment) * this.stemDirection : 0);
+  /**
+   * Return the rendered x coordinate for a notehead whose parent chord begins
+   * at `baseX`. Unlike `getAbsoluteX()`, this does not depend on or mutate the
+   * notehead's current draw state, so layout clients can query displaced chord
+   * heads before drawing.
+   */
+  getRenderedX(baseX: number): number {
+    // For a more natural displaced notehead, we adjust the displacement amount
+    // by half the stem width in order to maintain a slight overlap with the stem.
+    const displacementStemAdjustment = Stem.WIDTH / 2;
+    return baseX + (this.displaced ? (this.width - displacementStemAdjustment) * this.stemDirection : 0);
+  }
+
+  /**
+   * Return the exact glyph bounding box at the supplied parent-note x
+   * coordinate without changing the notehead's stored position.
+   */
+  getBoundingBoxAt(baseX: number): BoundingBox {
+    const boundingBox = super.getBoundingBox().clone();
+    boundingBox.setX(this.getRenderedX(baseX) + this.xShift);
+    return boundingBox;
   }
 
   /** Set notehead to a provided `stave`. */

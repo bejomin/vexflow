@@ -37,6 +37,19 @@ export interface StaveNoteHeadBounds {
   lowestNonDisplacedLine: number;
 }
 
+export interface StaveNoteSelectedNoteHeadBounds {
+  index: number;
+  boundingBox: BoundingBox;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  centerX: number;
+  centerY: number;
+  line: number;
+  displaced: boolean;
+}
+
 export interface StaveNoteFormatSettings {
   line: number;
   maxLine: number;
@@ -1030,6 +1043,46 @@ export class StaveNote extends StemmableNote {
     return this._noteHeads.slice();
   }
 
+  /**
+   * Return the exact pre-draw bounds for one selected head in a chord.
+   *
+   * The regular note bounding box includes stems, flags and modifiers. Slurs,
+   * ties and articulation layout instead need the glyph bounds for the exact
+   * MusicXML pitch they attach to, including VexFlow's chord-head displacement.
+   */
+  getNoteHeadBoundingBox(index: number): BoundingBox {
+    const noteHead = this._noteHeads[index];
+    if (!noteHead) {
+      throw new RuntimeError('BadArguments', `No notehead exists at index ${index}.`);
+    }
+    return noteHead.getBoundingBoxAt(this.getNoteHeadBeginX());
+  }
+
+  /** Return a serializable description of one selected notehead's geometry. */
+  getSelectedNoteHeadBounds(index: number): StaveNoteSelectedNoteHeadBounds {
+    const noteHead = this._noteHeads[index];
+    if (!noteHead) {
+      throw new RuntimeError('BadArguments', `No notehead exists at index ${index}.`);
+    }
+    const boundingBox = this.getNoteHeadBoundingBox(index);
+    const left = boundingBox.getX();
+    const top = boundingBox.getY();
+    const right = left + boundingBox.getW();
+    const bottom = top + boundingBox.getH();
+    return {
+      index,
+      boundingBox,
+      left,
+      right,
+      top,
+      bottom,
+      centerX: (left + right) / 2,
+      centerY: (top + bottom) / 2,
+      line: noteHead.getLine(),
+      displaced: noteHead.isDisplaced(),
+    };
+  }
+
   // Draw the ledger lines between the stave and the highest/lowest keys
   drawLedgerLines(): void {
     const stave = this.checkStave();
@@ -1148,6 +1201,27 @@ export class StaveNote extends StemmableNote {
     });
   }
 
+  /**
+   * Finalize notehead, stem, beam, and articulation geometry without drawing.
+   * Safe to call repeatedly after horizontal formatting or stave changes.
+   */
+  layoutArticulations(): void {
+    const xBegin = this.getNoteHeadBeginX();
+    this._noteHeads.forEach((notehead) => notehead.setX(xBegin));
+
+    if (this.stem) {
+      const stemX = this.getStemX();
+      this.stem.setNoteHeadXBounds(stemX, stemX);
+    }
+    this.beam?.postFormat();
+
+    for (const modifier of this.modifiers) {
+      if (modifier.getCategory() === Category.Articulation) {
+        (modifier as Modifier & { layout(): unknown }).layout();
+      }
+    }
+  }
+
   override drawStem(stemOptions?: StemOptions): void {
     // GCR TODO: I can't find any context in which this is called with the stemStruct
     // argument in the codebase or tests. Nor can I find a case where super.drawStem
@@ -1222,11 +1296,8 @@ export class StaveNote extends StemmableNote {
     const xBegin = this.getNoteHeadBeginX();
     const shouldRenderStem = this.hasStem() && !this.beam;
 
-    // Format note head x positions
     this._noteHeads.forEach((notehead) => notehead.setX(xBegin));
-
     if (this.stem) {
-      // Format stem x positions
       const stemX = this.getStemX();
       this.stem.setNoteHeadXBounds(stemX, stemX);
     }
