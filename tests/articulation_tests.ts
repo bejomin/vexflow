@@ -6,7 +6,7 @@
 import { VexFlow } from '../src/vexflow';
 import { TestOptions, VexFlowTests } from './vexflow_test_helpers';
 
-import { Articulation } from '../src/articulation';
+import { Articulation, ArticulationLayout } from '../src/articulation';
 import { Beam } from '../src/beam';
 import { Formatter } from '../src/formatter';
 import { Glyphs } from '../src/glyphs';
@@ -29,6 +29,9 @@ const ArticulationTests = {
     run('Vertical Placement', verticalPlacement, { drawBoundingBox: false });
     run('Vertical Placement (Glyph codes)', verticalPlacement2);
     run('Origin remains stable after positioning', originRemainsStable);
+    run('Pre-draw selected notehead layout', selectedNoteheadPreDrawLayout);
+    run('Final beam geometry precedes articulation layout', finalBeamGeometryLayout);
+    run('Outward displacement is absolute and idempotent', absoluteOutwardDisplacement);
     run('Staccato/Staccatissimo', drawArticulations, { sym1: 'a.', sym2: 'av' });
     run('Accent/Tenuto', drawArticulations, { sym1: 'a>', sym2: 'a-' });
     run('Marcato/L.H. Pizzicato', drawArticulations, { sym1: 'a^', sym2: 'a+' });
@@ -61,6 +64,94 @@ function originRemainsStable(options: TestOptions): void {
     articulation.getYShift(),
     initialYShift,
     'The glyph origin does not absorb the previous rendered y coordinate.'
+  );
+}
+
+function formatNotesToStave(stave: Stave, notes: StaveNote[], beats: number): void {
+  const voice = new Voice({ numBeats: beats, beatValue: 8 }).addTickables(notes);
+  new Formatter().joinVoices([voice]).formatToStave([voice], stave, { stave });
+}
+
+function assertClose(options: TestOptions, actual: number, expected: number, message: string): void {
+  options.assert.ok(Math.abs(actual - expected) <= 0.001, `${message}: expected ${expected}, got ${actual}`);
+}
+
+function selectedNoteheadPreDrawLayout(options: TestOptions, contextBuilder: ContextBuilder): void {
+  const ctx = contextBuilder(options.elementId, 420, 180);
+  const stave = new Stave(10, 40, 400).setContext(ctx);
+  const articulation = new Articulation('a.').setPosition(ModifierPosition.ABOVE);
+  const note = new StaveNote({
+    keys: ['b/4', 'c/5'],
+    duration: '8',
+    stemDirection: Stem.UP,
+  }).addModifier(articulation, 1);
+
+  formatNotesToStave(stave, [note], 1);
+
+  const selectedHead = note.getSelectedNoteHeadBounds(1);
+  note.layoutArticulations();
+  const firstLayout = articulation.getLayout();
+  const secondLayout = articulation.layout();
+  options.assert.ok(selectedHead.displaced, 'the selected upper chord head is displaced');
+  assertClose(
+    options,
+    firstLayout.x,
+    selectedHead.centerX,
+    'articulation is centered on the selected displaced notehead'
+  );
+  assertClose(options, secondLayout.x, firstLayout.x, 'repeated pre-draw layout keeps x stable');
+  assertClose(options, secondLayout.y, firstLayout.y, 'repeated pre-draw layout keeps y stable');
+
+  articulation.setContext(ctx);
+  articulation.draw();
+  const afterDraw = articulation.getLayout();
+  assertClose(options, afterDraw.x, firstLayout.x, 'draw consumes the calculated x without changing it');
+  assertClose(options, afterDraw.y, firstLayout.y, 'draw consumes the calculated y without changing it');
+}
+
+function finalBeamGeometryLayout(options: TestOptions, contextBuilder: ContextBuilder): void {
+  const ctx = contextBuilder(options.elementId, 420, 180);
+  const stave = new Stave(10, 40, 400).setContext(ctx);
+  const articulation = new Articulation('a>').setPosition(ModifierPosition.ABOVE);
+  const notes = [
+    new StaveNote({ keys: ['c/5'], duration: '8', stemDirection: Stem.UP }).addModifier(articulation, 0),
+    new StaveNote({ keys: ['g/5'], duration: '8', stemDirection: Stem.UP }),
+  ];
+  const beam = new Beam(notes);
+
+  formatNotesToStave(stave, notes, 2);
+
+  const firstLayout: ArticulationLayout = articulation.getLayout();
+  const firstStemTip = notes[0].getStemExtents().topY;
+  options.assert.ok(beam.postFormatted, 'beam geometry is finalized by formatter post-format');
+  options.assert.ok(firstLayout.y < firstStemTip, 'stem-side articulation clears the final beamed stem tip');
+
+  beam.postFormat();
+  const secondLayout = articulation.layout();
+  assertClose(options, secondLayout.x, firstLayout.x, 're-finalizing the beam does not move articulation x');
+  assertClose(options, secondLayout.y, firstLayout.y, 're-finalizing the beam does not move articulation y');
+}
+
+function absoluteOutwardDisplacement(options: TestOptions, contextBuilder: ContextBuilder): void {
+  const ctx = contextBuilder(options.elementId, 420, 180);
+  const stave = new Stave(10, 40, 400).setContext(ctx);
+  const articulation = new Articulation('a-').setPosition(ModifierPosition.ABOVE);
+  const note = new StaveNote({ keys: ['c/5'], duration: '8', stemDirection: Stem.DOWN }).addModifier(articulation, 0);
+
+  formatNotesToStave(stave, [note], 1);
+  const baseline = articulation.getLayout();
+  articulation.setOutwardShift(12);
+  const shifted = articulation.layout();
+  articulation.setOutwardShift(12);
+  const repeated = articulation.layout();
+
+  assertClose(options, shifted.y, baseline.y - 12, 'above articulation moves outward by the requested amount');
+  assertClose(options, repeated.y, shifted.y, 'reapplying the same outward shift does not accumulate');
+  assertClose(
+    options,
+    repeated.boundingBox.getY(),
+    shifted.boundingBox.getY(),
+    'the final articulation bounds remain stable'
   );
 }
 
