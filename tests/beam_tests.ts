@@ -70,7 +70,23 @@ function simple(options: TestOptions): void {
 
   f.Formatter().joinVoices([voice]).formatToStave([voice], stave);
 
+  const renderedBeam = voice
+    .getTickables()
+    .find((tickable) => (tickable as StemmableNote).getBeam?.()) as StemmableNote;
+  const vfBeam = renderedBeam.getBeam();
+  const polygonsBeforeDraw = vfBeam?.getRenderedBeamPolygons();
+  options.assert.ok(
+    polygonsBeforeDraw && polygonsBeforeDraw.length > 0,
+    'Finalized beam polygons are available before draw'
+  );
+
   f.draw();
+
+  options.assert.deepEqual(
+    vfBeam?.getRenderedBeamPolygons(),
+    polygonsBeforeDraw,
+    'Beam drawing consumes the same finalized polygons'
+  );
 
   options.assert.ok(true, 'Simple Test');
 }

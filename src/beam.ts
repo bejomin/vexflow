@@ -43,6 +43,12 @@ export const BEAM_BOTH = 'B';
 
 export type PartialBeamDirection = typeof BEAM_LEFT | typeof BEAM_RIGHT | typeof BEAM_BOTH;
 
+/** Final beam geometry in render-context pixels, shared by drawing and collision layout. */
+export interface BeamRenderPolygon {
+  points: [{ x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number }];
+  duration: string;
+}
+
 /** `Beams` span over a set of `StemmableNotes`. */
 export class Beam extends Element {
   static override get CATEGORY(): string {
@@ -918,16 +924,18 @@ export class Beam extends Element {
     }, this);
   }
 
-  // Render the beam lines
-  protected drawBeamLines(ctx: RenderContext): void {
+  /** Return the finalized beam polygons using exactly the geometry consumed by draw(). */
+  getRenderedBeamPolygons(): BeamRenderPolygon[] {
+    if (!this.postFormatted) {
+      this.postFormat();
+    }
     const validBeamDurations = ['4', '8', '16', '32', '64', '128', '256', '512', '1024'];
-
     const firstNote = this.notes[0];
     let beamY = this.getBeamYToDraw();
     const firstStemX = firstNote.getStemX();
     const beamThickness = this.renderOptions.beamWidth * this._stemDirection;
+    const polygons: BeamRenderPolygon[] = [];
 
-    // Draw the beams.
     for (let i = 0; i < validBeamDurations.length; ++i) {
       const duration = validBeamDurations[i];
       const beamLines = this.getBeamLines(duration);
@@ -938,22 +946,37 @@ export class Beam extends Element {
 
         const startBeamY = this.getSlopeY(startBeamX, firstStemX, beamY, this.slope);
         const lastBeamX = beamLine.end;
-        if (lastBeamX) {
+        if (lastBeamX !== undefined) {
           const lastBeamY = this.getSlopeY(lastBeamX, firstStemX, beamY, this.slope);
-
-          ctx.beginPath();
-          ctx.moveTo(startBeamX, startBeamY);
-          ctx.lineTo(startBeamX, startBeamY + beamThickness);
-          ctx.lineTo(lastBeamX + 1, lastBeamY + beamThickness);
-          ctx.lineTo(lastBeamX + 1, lastBeamY);
-          ctx.closePath();
-          ctx.fill();
+          polygons.push({
+            duration,
+            points: [
+              { x: startBeamX, y: startBeamY },
+              { x: startBeamX, y: startBeamY + beamThickness },
+              { x: lastBeamX + 1, y: lastBeamY + beamThickness },
+              { x: lastBeamX + 1, y: lastBeamY },
+            ],
+          });
         } else {
           throw new RuntimeError('NoLastBeamX', 'lastBeamX undefined.');
         }
       }
 
       beamY += beamThickness * 1.5;
+    }
+    return polygons;
+  }
+
+  // Render the beam lines
+  protected drawBeamLines(ctx: RenderContext): void {
+    for (const polygon of this.getRenderedBeamPolygons()) {
+      ctx.beginPath();
+      ctx.moveTo(polygon.points[0].x, polygon.points[0].y);
+      for (let index = 1; index < polygon.points.length; index++) {
+        ctx.lineTo(polygon.points[index].x, polygon.points[index].y);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
   }
 

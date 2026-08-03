@@ -18,6 +18,14 @@ export interface TieNotes {
   lastIndexes?: number[];
 }
 
+/** Final quadratic outlines in render-context pixels, shared by drawing and collision layout. */
+export interface TieRenderCurve {
+  start: { x: number; y: number };
+  topControl: { x: number; y: number };
+  end: { x: number; y: number };
+  bottomControl: { x: number; y: number };
+}
+
 export class StaveTie extends Element {
   static override get CATEGORY(): string {
     return Category.StaveTie;
@@ -134,49 +142,66 @@ export class StaveTie extends Element {
     }
 
     const ctx = this.checkContext();
-    let cp1 = this.renderOptions.cp1;
-    let cp2 = this.renderOptions.cp2;
-
-    if (Math.abs(params.lastX - params.firstX) < this.renderOptions.shortTieCutoff) {
-      // do not get super exaggerated curves for very short ties
-      cp1 = this.renderOptions.cp1Short;
-      cp2 = this.renderOptions.cp2Short;
-    }
-
-    const firstXShift = this.renderOptions.firstXShift;
-    const lastXShift = this.renderOptions.lastXShift;
-    const yShift = this.renderOptions.yShift * params.direction;
-
-    // setNotes(...) verified that firstIndexes and lastIndexes are not undefined.
-    // As a result, we use the ! non-null assertion operator here.
-
-    const firstIndexes = this.notes.firstIndexes!;
-
-    const lastIndexes = this.notes.lastIndexes!;
     const clsAttribute = this.getAttribute('class');
     ctx.openGroup('stavetie' + (clsAttribute ? ' ' + clsAttribute : ''), this.getAttribute('id'));
-    for (let i = 0; i < firstIndexes.length; ++i) {
-      const cpX = (params.lastX + lastXShift + (params.firstX + firstXShift)) / 2;
-      // firstY and lastY are specified in pixels.
-      const firstY = params.firstYs[firstIndexes[i]] + yShift;
-      const lastY = params.lastYs[lastIndexes[i]] + yShift;
-
-      if (isNaN(firstY) || isNaN(lastY)) {
-        throw new RuntimeError('BadArguments', 'Bad indexes for tie rendering.');
-      }
-
-      const topControlPointY = (firstY + lastY) / 2 + cp1 * params.direction;
-      const bottomControlPointY = (firstY + lastY) / 2 + cp2 * params.direction;
-
+    for (const curve of this.calculateRenderedTieCurves(params)) {
       ctx.beginPath();
-      ctx.moveTo(params.firstX + firstXShift, firstY);
-      ctx.quadraticCurveTo(cpX, topControlPointY, params.lastX + lastXShift, lastY);
-      ctx.quadraticCurveTo(cpX, bottomControlPointY, params.firstX + firstXShift, firstY);
+      ctx.moveTo(curve.start.x, curve.start.y);
+      ctx.quadraticCurveTo(curve.topControl.x, curve.topControl.y, curve.end.x, curve.end.y);
+      ctx.quadraticCurveTo(curve.bottomControl.x, curve.bottomControl.y, curve.start.x, curve.start.y);
       ctx.closePath();
       ctx.fill();
     }
     this.drawPointerRect();
     ctx.closeGroup();
+  }
+
+  private calculateRenderedTieCurves(params: {
+    direction: number;
+    firstX: number;
+    lastX: number;
+    lastYs: number[];
+    firstYs: number[];
+  }): TieRenderCurve[] {
+    let cp1 = this.renderOptions.cp1;
+    let cp2 = this.renderOptions.cp2;
+    if (Math.abs(params.lastX - params.firstX) < this.renderOptions.shortTieCutoff) {
+      cp1 = this.renderOptions.cp1Short;
+      cp2 = this.renderOptions.cp2Short;
+    }
+    const firstX = params.firstX + this.renderOptions.firstXShift;
+    const lastX = params.lastX + this.renderOptions.lastXShift;
+    const cpX = (lastX + firstX) / 2;
+    const yShift = this.renderOptions.yShift * params.direction;
+    const curves: TieRenderCurve[] = [];
+    const firstIndexes = this.notes.firstIndexes!;
+    const lastIndexes = this.notes.lastIndexes!;
+    for (let index = 0; index < firstIndexes.length; index++) {
+      const firstY = params.firstYs[firstIndexes[index]] + yShift;
+      const lastY = params.lastYs[lastIndexes[index]] + yShift;
+      if (isNaN(firstY) || isNaN(lastY)) {
+        throw new RuntimeError('BadArguments', 'Bad indexes for tie rendering.');
+      }
+      curves.push({
+        start: { x: firstX, y: firstY },
+        topControl: { x: cpX, y: (firstY + lastY) / 2 + cp1 * params.direction },
+        end: { x: lastX, y: lastY },
+        bottomControl: { x: cpX, y: (firstY + lastY) / 2 + cp2 * params.direction },
+      });
+    }
+    return curves;
+  }
+
+  /** Return the finalized tie outlines using exactly the geometry consumed by draw(). */
+  getRenderedTieCurves(): TieRenderCurve[] {
+    this.synchronizeIndexes();
+    return this.calculateRenderedTieCurves({
+      firstX: this.getFirstX(),
+      lastX: this.getLastX(),
+      firstYs: this.getFirstYs(),
+      lastYs: this.getLastYs(),
+      direction: this.getDirection(),
+    });
   }
 
   /**
