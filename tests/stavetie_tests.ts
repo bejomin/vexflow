@@ -156,7 +156,16 @@ function tieAlgorithms(options: TestOptions): void {
     options: { direction: Stem.DOWN },
   });
   factory.Formatter().joinVoices([voice]).formatToStave([voice], stave);
+  const tieCurvesBeforeDraw = tie1.getRenderedTieCurves();
+  options.assert.equal(tieCurvesBeforeDraw.length, 1);
+  options.assert.equal(tieCurvesBeforeDraw[0].start.x, tie1.getFirstX());
+  options.assert.equal(tieCurvesBeforeDraw[0].end.x, tie1.getLastX());
   factory.draw();
+  options.assert.deepEqual(
+    tie1.getRenderedTieCurves(),
+    tieCurvesBeforeDraw,
+    'Tie drawing consumes the same finalized curves'
+  );
   options.assert.equal(tie1.getDirection(), Stem.UP);
   options.assert.equal(tie2.getDirection(), Stem.DOWN);
   options.assert.ok(tie1.getFirstX() < tie1.getLastX());
