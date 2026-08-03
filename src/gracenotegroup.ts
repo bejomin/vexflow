@@ -12,7 +12,7 @@ import { ModifierContextState } from './modifiercontext';
 import { Note } from './note';
 import { RenderContext } from './rendercontext';
 import { StaveNote } from './stavenote';
-import { StaveTie } from './stavetie';
+import { StaveTie, TieRenderCurve } from './stavetie';
 import { StemmableNote } from './stemmablenote';
 import { Tables } from './tables';
 import { TabTie } from './tabtie';
@@ -24,6 +24,44 @@ import { Voice } from './voice';
 // eslint-disable-next-line
 function L(...args: any) {
   if (GraceNoteGroup.DEBUG) log('VexFlow.GraceNoteGroup', args);
+}
+
+export interface GraceNoteSlurBounds {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+export interface GraceNoteSlurLayout {
+  curves: TieRenderCurve[];
+  direction: number;
+  startNotehead: GraceNoteSlurBounds;
+  endNotehead: GraceNoteSlurBounds;
+  intersectedEndpointIds: ('start-notehead' | 'end-notehead')[];
+}
+
+function pointInsideBounds(point: { x: number; y: number }, bounds: GraceNoteSlurBounds): boolean {
+  const epsilon = 0.01;
+  return (
+    point.x > bounds.left + epsilon &&
+    point.x < bounds.right - epsilon &&
+    point.y > bounds.top + epsilon &&
+    point.y < bounds.bottom - epsilon
+  );
+}
+
+function quadraticPoint(
+  start: { x: number; y: number },
+  control: { x: number; y: number },
+  end: { x: number; y: number },
+  t: number
+): { x: number; y: number } {
+  const oneMinusT = 1 - t;
+  return {
+    x: oneMinusT * oneMinusT * start.x + 2 * oneMinusT * t * control.x + t * t * end.x,
+    y: oneMinusT * oneMinusT * start.y + 2 * oneMinusT * t * control.y + t * t * end.y,
+  };
 }
 
 /** GraceNoteGroup is used to format and render grace notes. */
@@ -165,6 +203,67 @@ export class GraceNoteGroup extends Modifier {
     return this.graceNotes;
   }
 
+  /** Return the finalized grace slur, once the group has been laid out. */
+  getSlur(): StaveTie | TabTie | undefined {
+    return this.slur;
+  }
+
+  /**
+   * Return the exact grace-slur outlines consumed by drawing.
+   *
+   * Grace slurs are drawn directly by GraceNoteGroup. Exposing that final
+   * geometry lets callers perform collision diagnostics without reconstructing
+   * a curve from rendered output.
+   */
+  getRenderedSlurCurves(): TieRenderCurve[] {
+    return this.slur instanceof StaveTie ? this.slur.getRenderedTieCurves() : [];
+  }
+
+  /** Return finalized grace-slur geometry and objective endpoint collisions. */
+  getSlurLayout(): GraceNoteSlurLayout | undefined {
+    if (!(this.slur instanceof StaveTie)) return undefined;
+    const notes = this.slur.getNotes();
+    if (!(notes.firstNote instanceof StaveNote) || !(notes.lastNote instanceof StaveNote)) return undefined;
+
+    const startIndex = notes.firstIndexes?.[0] ?? 0;
+    const endIndex = notes.lastIndexes?.[0] ?? 0;
+    const start = notes.firstNote.getSelectedNoteHeadBounds(startIndex);
+    const end = notes.lastNote.getSelectedNoteHeadBounds(endIndex);
+    const startNotehead: GraceNoteSlurBounds = {
+      left: start.left,
+      right: start.right,
+      top: start.top,
+      bottom: start.bottom,
+    };
+    const endNotehead: GraceNoteSlurBounds = {
+      left: end.left,
+      right: end.right,
+      top: end.top,
+      bottom: end.bottom,
+    };
+    const curves = this.getRenderedSlurCurves();
+    const intersectedEndpointIds: ('start-notehead' | 'end-notehead')[] = [];
+    for (const [id, bounds] of [
+      ['start-notehead', startNotehead],
+      ['end-notehead', endNotehead],
+    ] as const) {
+      const intersects = curves.some((curve) => {
+        for (let sample = 1; sample < 24; sample++) {
+          const t = sample / 24;
+          if (
+            pointInsideBounds(quadraticPoint(curve.start, curve.topControl, curve.end, t), bounds) ||
+            pointInsideBounds(quadraticPoint(curve.start, curve.bottomControl, curve.end, t), bounds)
+          ) {
+            return true;
+          }
+        }
+        return false;
+      });
+      if (intersects) intersectedEndpointIds.push(id);
+    }
+    return { curves, direction: this.slur.getDirection(), startNotehead, endNotehead, intersectedEndpointIds };
+  }
+
   override draw(): void {
     const ctx: RenderContext = this.checkContext();
     const note = this.checkAttachedNote();
@@ -184,12 +283,30 @@ export class GraceNoteGroup extends Modifier {
       const isStavenote = isStaveNote(note);
       const TieClass = isStavenote ? StaveTie : TabTie;
 
+      // A grace slur follows musical order: the final grace note (the one
+      // nearest the beat) into the main note. Reversing these endpoints makes
+      // the curve run from the main note's far edge to the first grace note's
+      // far edge, crossing the noteheads it is supposed to connect.
       this.slur = new TieClass({
-        lastNote: this.graceNotes[0],
-        firstNote: note,
+        firstNote: this.graceNotes[this.graceNotes.length - 1],
+        lastNote: note,
         firstIndexes: [0],
         lastIndexes: [0],
       });
+
+      if (this.slur instanceof StaveTie && isStavenote) {
+        const nearestGrace = this.graceNotes[this.graceNotes.length - 1];
+        const graceY = nearestGrace.getYs()[0];
+        const mainY = note.getYs()[0];
+        if (Math.abs(mainY - graceY) >= 2 * Tables.STAVE_LINE_DISTANCE) {
+          // On a large leap, following the main note's stem can put the slur
+          // inside the interval and make its diagonal cross a connected head.
+          // Route it around the outside of the leap: above when the grace note
+          // is higher, below when it is lower. Close grace gestures retain the
+          // conventional stem-derived placement.
+          this.slur.setDirection(graceY < mainY ? -1 : 1);
+        }
+      }
 
       this.slur.renderOptions.cp2 = 12;
       this.slur.renderOptions.yShift = (isStavenote ? 7 : 5) + this.renderOptions.slurYShift;

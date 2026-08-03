@@ -379,11 +379,18 @@ export class Articulation extends Modifier {
     const staffSpace = stave.getSpacingBetweenLines();
     const isTab = isTabNote(note);
 
-    // Articulations are centered over/under the selected note head, including
-    // displaced chord heads. Non-StaveNote types retain their native anchor.
+    // Keep articulations on the optical centre of the owning chord. In
+    // particular, an articulation encoded on one displaced head of an
+    // adjacent-second chord still belongs to the chord as a whole. Neither the
+    // selected head nor VexFlow's undisplaced-head column is the visual centre.
     let { x } = note.getModifierStartXY(position, index);
     if (isStaveNote(note)) {
-      x = note.getSelectedNoteHeadBounds(index).centerX;
+      const noteheadBounds = note.noteHeads.map((_notehead, noteheadIndex) =>
+        note.getSelectedNoteHeadBounds(noteheadIndex)
+      );
+      const left = Math.min(...noteheadBounds.map((bounds) => bounds.left));
+      const right = Math.max(...noteheadBounds.map((bounds) => bounds.right));
+      x = (left + right) / 2;
     }
     const shouldSitOutsideStaff = !canSitBetweenLines || isTab;
 

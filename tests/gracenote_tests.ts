@@ -16,6 +16,7 @@ import { Dot } from '../src/dot';
 import { Factory } from '../src/factory';
 import { Formatter } from '../src/formatter';
 import { GraceNote, GraceNoteStruct } from '../src/gracenote';
+import { GraceNoteGroup } from '../src/gracenotegroup';
 import { StaveNote, StaveNoteStruct } from '../src/stavenote';
 
 const GraceNoteTests = {
@@ -190,10 +191,13 @@ function basicSlurred(options: TestOptions): void {
   gracenotes3[2].addModifier(f.Accidental({ type: 'n' }), 0);
   Dot.buildAndAttach([gracenotes4[0]], { all: true });
 
+  const firstGraceGroup = f.GraceNoteGroup({ notes: gracenotes0, slur: true }).beamNotes();
+  const steepGraceGroup = f.GraceNoteGroup({
+    notes: [{ keys: ['e/6'], duration: '8' }].map(f.GraceNote.bind(f)),
+    slur: true,
+  });
   const notes = [
-    f
-      .StaveNote({ keys: ['b/4'], duration: '4', autoStem: true })
-      .addModifier(f.GraceNoteGroup({ notes: gracenotes0, slur: true }).beamNotes(), 0),
+    f.StaveNote({ keys: ['b/4'], duration: '4', autoStem: true }).addModifier(firstGraceGroup, 0),
     f
       .StaveNote({ keys: ['c/5'], duration: '4', autoStem: true })
       .addModifier(f.Accidental({ type: '#' }), 0)
@@ -207,7 +211,7 @@ function basicSlurred(options: TestOptions): void {
     f
       .StaveNote({ keys: ['a/4'], duration: '4', autoStem: true })
       .addModifier(f.GraceNoteGroup({ notes: gracenotes4, slur: true }).beamNotes(), 0),
-    f.StaveNote({ keys: ['a/4'], duration: '4', autoStem: true }),
+    f.StaveNote({ keys: ['a/4'], duration: '4', autoStem: true }).addModifier(steepGraceGroup, 0),
   ];
 
   const voice = f.Voice().setStrict(false).addTickables(notes);
@@ -216,7 +220,21 @@ function basicSlurred(options: TestOptions): void {
 
   f.draw();
 
-  options.assert.ok(true, 'GraceNoteBasic');
+  const slur = (firstGraceGroup as GraceNoteGroup).getSlur();
+  options.assert.strictEqual(slur?.getNotes().firstNote, gracenotes0.at(-1), 'slur starts at nearest grace note');
+  options.assert.strictEqual(slur?.getNotes().lastNote, notes[0], 'slur ends at main note');
+  const curve = (firstGraceGroup as GraceNoteGroup).getRenderedSlurCurves()[0];
+  options.assert.ok(curve.start.x < curve.end.x, 'slur follows the left-to-right musical order');
+  options.assert.deepEqual(
+    (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.intersectedEndpointIds,
+    [],
+    'slur does not cross either connected notehead'
+  );
+  options.assert.strictEqual(
+    (steepGraceGroup as GraceNoteGroup).getSlurLayout()?.direction,
+    -1,
+    'a high grace note on a large descending leap routes its slur above'
+  );
 }
 
 /**

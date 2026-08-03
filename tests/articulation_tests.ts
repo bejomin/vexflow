@@ -29,7 +29,7 @@ const ArticulationTests = {
     run('Vertical Placement', verticalPlacement, { drawBoundingBox: false });
     run('Vertical Placement (Glyph codes)', verticalPlacement2);
     run('Origin remains stable after positioning', originRemainsStable);
-    run('Pre-draw selected notehead layout', selectedNoteheadPreDrawLayout);
+    run('Pre-draw chord-column layout', chordColumnPreDrawLayout);
     run('Final beam geometry precedes articulation layout', finalBeamGeometryLayout);
     run('Notes without articulations leave beam geometry alone', noArticulationLayoutIsNoop);
     run('Outward displacement is absolute and idempotent', absoluteOutwardDisplacement);
@@ -77,7 +77,7 @@ function assertClose(options: TestOptions, actual: number, expected: number, mes
   options.assert.ok(Math.abs(actual - expected) <= 0.001, `${message}: expected ${expected}, got ${actual}`);
 }
 
-function selectedNoteheadPreDrawLayout(options: TestOptions, contextBuilder: ContextBuilder): void {
+function chordColumnPreDrawLayout(options: TestOptions, contextBuilder: ContextBuilder): void {
   const ctx = contextBuilder(options.elementId, 420, 180);
   const stave = new Stave(10, 40, 400).setContext(ctx);
   const articulation = new Articulation('a.').setPosition(ModifierPosition.ABOVE);
@@ -90,15 +90,17 @@ function selectedNoteheadPreDrawLayout(options: TestOptions, contextBuilder: Con
   formatNotesToStave(stave, [note], 1);
 
   const selectedHead = note.getSelectedNoteHeadBounds(1);
+  const otherHead = note.getSelectedNoteHeadBounds(0);
+  const chordCentre = (Math.min(selectedHead.left, otherHead.left) + Math.max(selectedHead.right, otherHead.right)) / 2;
   note.layoutArticulations();
   const firstLayout = articulation.getLayout();
   const secondLayout = articulation.layout();
   options.assert.ok(selectedHead.displaced, 'the selected upper chord head is displaced');
-  assertClose(
-    options,
+  assertClose(options, firstLayout.x, chordCentre, 'articulation is centered on the owning chord');
+  options.assert.notEqual(
     firstLayout.x,
     selectedHead.centerX,
-    'articulation is centered on the selected displaced notehead'
+    'displaced notehead does not pull the chord articulation aside'
   );
   assertClose(options, secondLayout.x, firstLayout.x, 'repeated pre-draw layout keeps x stable');
   assertClose(options, secondLayout.y, firstLayout.y, 'repeated pre-draw layout keeps y stable');
