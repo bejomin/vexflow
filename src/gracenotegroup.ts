@@ -36,6 +36,8 @@ export interface GraceNoteSlurBounds {
 export interface GraceNoteSlurLayout {
   curves: TieRenderCurve[];
   direction: number;
+  startAttachment: 'notehead' | 'stem-tip';
+  endAttachment: 'notehead' | 'stem-tip';
   startNotehead: GraceNoteSlurBounds;
   endNotehead: GraceNoteSlurBounds;
   intersectedEndpointIds: ('start-notehead' | 'end-notehead')[];
@@ -80,6 +82,9 @@ export class GraceNoteGroup extends Modifier {
   protected formatter?: Formatter;
   public renderOptions: { slurYShift: number };
   protected slur?: StaveTie | TabTie;
+  protected slurStartIndex: number;
+  protected slurStartAttachment: 'notehead' | 'stem-tip' = 'notehead';
+  protected slurEndAttachment: 'notehead' | 'stem-tip' = 'notehead';
   protected beams: Beam[];
 
   /** Arranges groups inside a `ModifierContext`. */
@@ -138,7 +143,7 @@ export class GraceNoteGroup extends Modifier {
   }
 
   //** `GraceNoteGroup` inherits from `Modifier` and is placed inside a `ModifierContext`. */
-  constructor(graceNotes: StemmableNote[], showSlur?: boolean) {
+  constructor(graceNotes: StemmableNote[], showSlur?: boolean, slurStartIndex?: number) {
     super();
 
     this.position = Modifier.Position.LEFT;
@@ -147,6 +152,7 @@ export class GraceNoteGroup extends Modifier {
 
     this.showSlur = showSlur;
     this.slur = undefined;
+    this.slurStartIndex = Math.max(0, Math.min(slurStartIndex ?? graceNotes.length - 1, graceNotes.length - 1));
 
     this.voice = new Voice({
       numBeats: 4,
@@ -261,7 +267,15 @@ export class GraceNoteGroup extends Modifier {
       });
       if (intersects) intersectedEndpointIds.push(id);
     }
-    return { curves, direction: this.slur.getDirection(), startNotehead, endNotehead, intersectedEndpointIds };
+    return {
+      curves,
+      direction: this.slur.getDirection(),
+      startAttachment: this.slurStartAttachment,
+      endAttachment: this.slurEndAttachment,
+      startNotehead,
+      endNotehead,
+      intersectedEndpointIds,
+    };
   }
 
   override draw(): void {
@@ -280,23 +294,25 @@ export class GraceNoteGroup extends Modifier {
 
     if (this.showSlur) {
       // Create and draw slur.
+      this.slurStartAttachment = 'notehead';
+      this.slurEndAttachment = 'notehead';
       const isStavenote = isStaveNote(note);
       const TieClass = isStavenote ? StaveTie : TabTie;
 
-      // A grace slur follows musical order: the final grace note (the one
-      // nearest the beat) into the main note. Reversing these endpoints makes
-      // the curve run from the main note's far edge to the first grace note's
-      // far edge, crossing the noteheads it is supposed to connect.
+      // A grace slur follows musical order from its source-selected grace note
+      // into the main note. Callers without source detail retain the historical
+      // nearest-grace default.
+      const slurStartNote = this.graceNotes[this.slurStartIndex];
       this.slur = new TieClass({
-        firstNote: this.graceNotes[this.graceNotes.length - 1],
+        firstNote: slurStartNote,
         lastNote: note,
         firstIndexes: [0],
         lastIndexes: [0],
       });
+      this.slur.renderOptions.yShift = (isStavenote ? 7 : 5) + this.renderOptions.slurYShift;
 
       if (this.slur instanceof StaveTie && isStavenote) {
-        const nearestGrace = this.graceNotes[this.graceNotes.length - 1];
-        const graceY = nearestGrace.getYs()[0];
+        const graceY = slurStartNote.getYs()[0];
         const mainY = note.getYs()[0];
         if (Math.abs(mainY - graceY) >= 2 * Tables.STAVE_LINE_DISTANCE) {
           // On a large leap, following the main note's stem can put the slur
@@ -306,10 +322,43 @@ export class GraceNoteGroup extends Modifier {
           // conventional stem-derived placement.
           this.slur.setDirection(graceY < mainY ? -1 : 1);
         }
-      }
 
-      this.slur.renderOptions.cp2 = 12;
-      this.slur.renderOptions.yShift = (isStavenote ? 7 : 5) + this.renderOptions.slurYShift;
+        const direction = this.slur.getDirection();
+        const attachStemTip = (
+          endpoint: 'start' | 'end',
+          endpointNote: StemmableNote,
+          defaultX: number,
+          defaultY: number
+        ): void => {
+          if (!endpointNote.hasStem() || endpointNote.getStemDirection() !== -direction) return;
+          const stemX = endpointNote.getStemX();
+          const stemTipY = endpointNote.getStemExtents().topY;
+          if (endpoint === 'start') {
+            this.slur!.renderOptions.firstXShift = stemX - defaultX;
+            this.slur!.renderOptions.firstYShift = stemTipY - defaultY;
+            this.slurStartAttachment = 'stem-tip';
+          } else {
+            this.slur!.renderOptions.lastXShift = stemX - defaultX;
+            this.slur!.renderOptions.lastYShift = stemTipY - defaultY;
+            this.slurEndAttachment = 'stem-tip';
+          }
+        };
+        const yShift = this.slur.renderOptions.yShift * direction;
+        attachStemTip('start', slurStartNote, this.slur.getFirstX(), graceY + yShift);
+        attachStemTip('end', note, this.slur.getLastX(), mainY + yShift);
+        if (this.slurStartIndex < this.graceNotes.length - 1) {
+          // A multi-note grace slur starts at the first source grace stem and
+          // must remain visibly above the intervening beam. Derive the control
+          // height from the endpoints so a diagonal gesture still clears the
+          // higher endpoint (and therefore the beam) by 0.8 staff-space.
+          const renderedStartY = graceY + yShift + this.slur.renderOptions.firstYShift;
+          const renderedEndY = mainY + yShift + this.slur.renderOptions.lastYShift;
+          const controlHeight = Math.abs(renderedEndY - renderedStartY) / 2 + 0.8 * Tables.STAVE_LINE_DISTANCE;
+          this.slur.renderOptions.cp1 = controlHeight;
+          this.slur.renderOptions.cp2 = controlHeight + 4;
+        }
+      }
+      if (this.slurStartIndex >= this.graceNotes.length - 1) this.slur.renderOptions.cp2 = 12;
       this.slur.setContext(ctx).drawWithStyle();
     }
   }
