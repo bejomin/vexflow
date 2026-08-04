@@ -191,11 +191,10 @@ function basicSlurred(options: TestOptions): void {
   gracenotes3[2].addModifier(f.Accidental({ type: 'n' }), 0);
   Dot.buildAndAttach([gracenotes4[0]], { all: true });
 
-  const firstGraceGroup = f.GraceNoteGroup({ notes: gracenotes0, slur: true }).beamNotes();
-  const steepGraceGroup = f.GraceNoteGroup({
-    notes: [{ keys: ['e/6'], duration: '8' }].map(f.GraceNote.bind(f)),
-    slur: true,
-  });
+  const firstGraceGroup = f.GraceNoteGroup({ notes: gracenotes0, slur: true, slurStartIndex: 0 }).beamNotes();
+  const steepGraceNotes = [{ keys: ['e/6'], duration: '8', stemDirection: 1 }].map(f.GraceNote.bind(f));
+  const steepGraceGroup = f.GraceNoteGroup({ notes: steepGraceNotes, slur: true });
+  const steepMainNote = f.StaveNote({ keys: ['a/4'], duration: '4', stemDirection: 1 });
   const notes = [
     f.StaveNote({ keys: ['b/4'], duration: '4', autoStem: true }).addModifier(firstGraceGroup, 0),
     f
@@ -211,7 +210,7 @@ function basicSlurred(options: TestOptions): void {
     f
       .StaveNote({ keys: ['a/4'], duration: '4', autoStem: true })
       .addModifier(f.GraceNoteGroup({ notes: gracenotes4, slur: true }).beamNotes(), 0),
-    f.StaveNote({ keys: ['a/4'], duration: '4', autoStem: true }).addModifier(steepGraceGroup, 0),
+    steepMainNote.addModifier(steepGraceGroup, 0),
   ];
 
   const voice = f.Voice().setStrict(false).addTickables(notes);
@@ -221,10 +220,16 @@ function basicSlurred(options: TestOptions): void {
   f.draw();
 
   const slur = (firstGraceGroup as GraceNoteGroup).getSlur();
-  options.assert.strictEqual(slur?.getNotes().firstNote, gracenotes0.at(-1), 'slur starts at nearest grace note');
+  options.assert.strictEqual(slur?.getNotes().firstNote, gracenotes0[0], 'slur preserves its source grace note');
   options.assert.strictEqual(slur?.getNotes().lastNote, notes[0], 'slur ends at main note');
   const curve = (firstGraceGroup as GraceNoteGroup).getRenderedSlurCurves()[0];
+  const curveDirection = (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.direction ?? 1;
+  const beamClearance =
+    curveDirection === -1
+      ? Math.min(curve.start.y, curve.end.y) - curve.topControl.y
+      : curve.topControl.y - Math.max(curve.start.y, curve.end.y);
   options.assert.ok(curve.start.x < curve.end.x, 'slur follows the left-to-right musical order');
+  options.assert.ok(beamClearance >= 7.9, 'a source-spanning grace slur clears the beamed grace notes');
   options.assert.deepEqual(
     (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.intersectedEndpointIds,
     [],
@@ -234,6 +239,26 @@ function basicSlurred(options: TestOptions): void {
     (steepGraceGroup as GraceNoteGroup).getSlurLayout()?.direction,
     -1,
     'a high grace note on a large descending leap routes its slur above'
+  );
+  const steepLayout = (steepGraceGroup as GraceNoteGroup).getSlurLayout();
+  const steepCurve = steepLayout?.curves[0];
+  options.assert.strictEqual(steepLayout?.startAttachment, 'stem-tip', 'steep slur starts at grace stem tip');
+  options.assert.strictEqual(steepLayout?.endAttachment, 'stem-tip', 'steep slur ends at main stem tip');
+  options.assert.ok(
+    Math.abs((steepCurve?.start.x ?? 0) - steepGraceNotes[0].getStemX()) < 0.001,
+    'steep slur starts at the grace stem x position'
+  );
+  options.assert.ok(
+    Math.abs((steepCurve?.end.x ?? 0) - steepMainNote.getStemX()) < 0.001,
+    'steep slur ends at the main stem x position'
+  );
+  options.assert.ok(
+    Math.abs((steepCurve?.start.y ?? 0) - steepGraceNotes[0].getStemExtents().topY) < 0.001,
+    'steep slur starts at the grace stem tip y position'
+  );
+  options.assert.ok(
+    Math.abs((steepCurve?.end.y ?? 0) - steepMainNote.getStemExtents().topY) < 0.001,
+    'steep slur ends at the main stem tip y position'
   );
 }
 

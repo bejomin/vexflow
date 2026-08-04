@@ -319,8 +319,8 @@ export class Factory {
     return note;
   }
 
-  GraceNoteGroup(params: { notes: StemmableNote[]; slur?: boolean }): GraceNoteGroup {
-    const group = new GraceNoteGroup(params.notes, params.slur);
+  GraceNoteGroup(params: { notes: StemmableNote[]; slur?: boolean; slurStartIndex?: number }): GraceNoteGroup {
+    const group = new GraceNoteGroup(params.notes, params.slur, params.slurStartIndex);
     group.setContext(this.context);
     return group;
   }

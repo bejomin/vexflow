@@ -39,6 +39,8 @@ export class StaveTie extends Element {
     cp2Short: number;
     firstXShift: number;
     lastXShift: number;
+    firstYShift: number;
+    lastYShift: number;
     tieSpacing: number;
     textShiftX: number;
     yShift: number;
@@ -74,6 +76,8 @@ export class StaveTie extends Element {
       textShiftX: 0,
       firstXShift: 0,
       lastXShift: 0,
+      firstYShift: 0,
+      lastYShift: 0,
       yShift: 7,
       tieSpacing: 0,
     };
@@ -163,22 +167,22 @@ export class StaveTie extends Element {
     lastYs: number[];
     firstYs: number[];
   }): TieRenderCurve[] {
+    const firstX = params.firstX + this.renderOptions.firstXShift;
+    const lastX = params.lastX + this.renderOptions.lastXShift;
     let cp1 = this.renderOptions.cp1;
     let cp2 = this.renderOptions.cp2;
-    if (Math.abs(params.lastX - params.firstX) < this.renderOptions.shortTieCutoff) {
+    if (Math.abs(lastX - firstX) < this.renderOptions.shortTieCutoff) {
       cp1 = this.renderOptions.cp1Short;
       cp2 = this.renderOptions.cp2Short;
     }
-    const firstX = params.firstX + this.renderOptions.firstXShift;
-    const lastX = params.lastX + this.renderOptions.lastXShift;
     const cpX = (lastX + firstX) / 2;
     const yShift = this.renderOptions.yShift * params.direction;
     const curves: TieRenderCurve[] = [];
     const firstIndexes = this.notes.firstIndexes!;
     const lastIndexes = this.notes.lastIndexes!;
     for (let index = 0; index < firstIndexes.length; index++) {
-      const firstY = params.firstYs[firstIndexes[index]] + yShift;
-      const lastY = params.lastYs[lastIndexes[index]] + yShift;
+      const firstY = params.firstYs[firstIndexes[index]] + yShift + this.renderOptions.firstYShift;
+      const lastY = params.lastYs[lastIndexes[index]] + yShift + this.renderOptions.lastYShift;
       if (isNaN(firstY) || isNaN(lastY)) {
         throw new RuntimeError('BadArguments', 'Bad indexes for tie rendering.');
       }
