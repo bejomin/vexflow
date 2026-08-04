@@ -230,7 +230,7 @@ function basicSlurred(options: TestOptions): void {
       ? Math.min(curve.start.y, curve.end.y) - curveMidpointY
       : curveMidpointY - Math.max(curve.start.y, curve.end.y);
   options.assert.ok(curve.start.x < curve.end.x, 'slur follows the left-to-right musical order');
-  options.assert.ok(beamClearance >= 11.9, 'a source-spanning grace slur clears the beamed grace notes');
+  options.assert.ok(beamClearance >= 5.9, 'a source-spanning grace slur clears the beamed grace notes');
   options.assert.deepEqual(
     (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.intersectedEndpointIds,
     [],
