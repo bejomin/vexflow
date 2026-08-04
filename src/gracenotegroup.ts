@@ -36,8 +36,8 @@ export interface GraceNoteSlurBounds {
 export interface GraceNoteSlurLayout {
   curves: TieRenderCurve[];
   direction: number;
-  startAttachment: 'notehead' | 'stem-tip';
-  endAttachment: 'notehead' | 'stem-tip';
+  startAttachment: 'notehead' | 'notehead-center' | 'stem-tip';
+  endAttachment: 'notehead' | 'notehead-center' | 'stem-tip';
   startNotehead: GraceNoteSlurBounds;
   endNotehead: GraceNoteSlurBounds;
   intersectedEndpointIds: ('start-notehead' | 'end-notehead')[];
@@ -83,8 +83,8 @@ export class GraceNoteGroup extends Modifier {
   public renderOptions: { slurYShift: number };
   protected slur?: StaveTie | TabTie;
   protected slurStartIndex: number;
-  protected slurStartAttachment: 'notehead' | 'stem-tip' = 'notehead';
-  protected slurEndAttachment: 'notehead' | 'stem-tip' = 'notehead';
+  protected slurStartAttachment: 'notehead' | 'notehead-center' | 'stem-tip' = 'notehead';
+  protected slurEndAttachment: 'notehead' | 'notehead-center' | 'stem-tip' = 'notehead';
   protected beams: Beam[];
 
   /** Arranges groups inside a `ModifierContext`. */
@@ -346,14 +346,21 @@ export class GraceNoteGroup extends Modifier {
         const yShift = this.slur.renderOptions.yShift * direction;
         attachStemTip('start', slurStartNote, this.slur.getFirstX(), graceY + yShift);
         attachStemTip('end', note, this.slur.getLastX(), mainY + yShift);
+        if (this.slurEndAttachment === 'notehead') {
+          const mainNotehead = note.getSelectedNoteHeadBounds(0);
+          this.slur.renderOptions.lastXShift = mainNotehead.centerX - this.slur.getLastX();
+          this.slurEndAttachment = 'notehead-center';
+        }
         if (this.slurStartIndex < this.graceNotes.length - 1) {
           // A multi-note grace slur starts at the first source grace stem and
-          // must remain visibly above the intervening beam. Derive the control
-          // height from the endpoints so a diagonal gesture still clears the
-          // higher endpoint (and therefore the beam) by 0.8 staff-space.
+          // must remain visibly above the intervening beam. For a quadratic
+          // curve, the midpoint travels only halfway towards its control
+          // point, so double both the endpoint delta and desired clearance.
+          // This keeps the visible inner edge 1.2 staff-spaces outside the
+          // higher endpoint even when the gesture is diagonal.
           const renderedStartY = graceY + yShift + this.slur.renderOptions.firstYShift;
           const renderedEndY = mainY + yShift + this.slur.renderOptions.lastYShift;
-          const controlHeight = Math.abs(renderedEndY - renderedStartY) / 2 + 0.8 * Tables.STAVE_LINE_DISTANCE;
+          const controlHeight = Math.abs(renderedEndY - renderedStartY) + 2.4 * Tables.STAVE_LINE_DISTANCE;
           this.slur.renderOptions.cp1 = controlHeight;
           this.slur.renderOptions.cp2 = controlHeight + 4;
         }
