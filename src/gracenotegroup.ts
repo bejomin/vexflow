@@ -356,11 +356,11 @@ export class GraceNoteGroup extends Modifier {
           // must remain visibly above the intervening beam. For a quadratic
           // curve, the midpoint travels only halfway towards its control
           // point, so double both the endpoint delta and desired clearance.
-          // This keeps the visible inner edge 1.2 staff-spaces outside the
+          // This keeps the visible inner edge 0.6 staff-spaces outside the
           // higher endpoint even when the gesture is diagonal.
           const renderedStartY = graceY + yShift + this.slur.renderOptions.firstYShift;
           const renderedEndY = mainY + yShift + this.slur.renderOptions.lastYShift;
-          const controlHeight = Math.abs(renderedEndY - renderedStartY) + 2.4 * Tables.STAVE_LINE_DISTANCE;
+          const controlHeight = Math.abs(renderedEndY - renderedStartY) + 1.2 * Tables.STAVE_LINE_DISTANCE;
           this.slur.renderOptions.cp1 = controlHeight;
           this.slur.renderOptions.cp2 = controlHeight + 4;
         }
