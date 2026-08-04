@@ -224,12 +224,13 @@ function basicSlurred(options: TestOptions): void {
   options.assert.strictEqual(slur?.getNotes().lastNote, notes[0], 'slur ends at main note');
   const curve = (firstGraceGroup as GraceNoteGroup).getRenderedSlurCurves()[0];
   const curveDirection = (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.direction ?? 1;
+  const curveMidpointY = (curve.start.y + 2 * curve.topControl.y + curve.end.y) / 4;
   const beamClearance =
     curveDirection === -1
-      ? Math.min(curve.start.y, curve.end.y) - curve.topControl.y
-      : curve.topControl.y - Math.max(curve.start.y, curve.end.y);
+      ? Math.min(curve.start.y, curve.end.y) - curveMidpointY
+      : curveMidpointY - Math.max(curve.start.y, curve.end.y);
   options.assert.ok(curve.start.x < curve.end.x, 'slur follows the left-to-right musical order');
-  options.assert.ok(beamClearance >= 7.9, 'a source-spanning grace slur clears the beamed grace notes');
+  options.assert.ok(beamClearance >= 11.9, 'a source-spanning grace slur clears the beamed grace notes');
   options.assert.deepEqual(
     (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.intersectedEndpointIds,
     [],
