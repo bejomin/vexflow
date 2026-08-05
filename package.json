@@ -116,6 +116,7 @@
     "webpack": "^5.99.9"
   },
   "scripts": {
+    "prepare": "grunt build:cjs build:types",
     "start": "grunt",
     "test": "grunt test",
     "reference": "grunt reference",
