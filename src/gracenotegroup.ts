@@ -7,6 +7,7 @@
 
 import { Beam } from './beam';
 import { Formatter } from './formatter';
+import { Metrics } from './metrics';
 import { Modifier } from './modifier';
 import { ModifierContextState } from './modifiercontext';
 import { Note } from './note';
@@ -64,6 +65,19 @@ function quadraticPoint(
     x: oneMinusT * oneMinusT * start.x + 2 * oneMinusT * t * control.x + t * t * end.x,
     y: oneMinusT * oneMinusT * start.y + 2 * oneMinusT * t * control.y + t * t * end.y,
   };
+}
+
+function curveIntersectsBounds(curve: TieRenderCurve, bounds: GraceNoteSlurBounds): boolean {
+  for (let sample = 1; sample < 24; sample++) {
+    const t = sample / 24;
+    if (
+      pointInsideBounds(quadraticPoint(curve.start, curve.topControl, curve.end, t), bounds) ||
+      pointInsideBounds(quadraticPoint(curve.start, curve.bottomControl, curve.end, t), bounds)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** GraceNoteGroup is used to format and render grace notes. */
@@ -132,9 +146,13 @@ export class GraceNoteGroup extends Modifier {
     for (let i = 0; i < groupList.length; ++i) {
       const gracenoteGroup = groupList[i].gracenoteGroup;
       formatWidth = gracenoteGroup.getWidth() + groupList[i].spacing;
-      gracenoteGroup.setSpacingFromNextModifier(
-        groupShift - Math.min(formatWidth, groupShift) + StaveNote.minNoteheadPadding
-      );
+      const note = gracenoteGroup.getNote();
+      const parentAccidentals = note.getModifiersByType(Category.Accidental);
+      const noteheadPadding =
+        parentAccidentals.length && gracenoteGroup.showSlur
+          ? Metrics.get('Accidental.noteheadAccidentalPadding')
+          : StaveNote.minNoteheadPadding;
+      gracenoteGroup.setSpacingFromNextModifier(groupShift - Math.min(formatWidth, groupShift) + noteheadPadding);
     }
 
     if (right) state.rightShift += groupShift;
@@ -152,7 +170,7 @@ export class GraceNoteGroup extends Modifier {
 
     this.showSlur = showSlur;
     this.slur = undefined;
-    this.slurStartIndex = Math.max(0, Math.min(slurStartIndex ?? graceNotes.length - 1, graceNotes.length - 1));
+    this.slurStartIndex = Math.max(0, Math.min(slurStartIndex ?? 0, graceNotes.length - 1));
 
     this.voice = new Voice({
       numBeats: 4,
@@ -209,6 +227,48 @@ export class GraceNoteGroup extends Modifier {
     return this.graceNotes;
   }
 
+  private getNoteHeadSpan(note: StaveNote): GraceNoteSlurBounds {
+    const bounds = note.noteHeads.map((noteHead) => noteHead.getBoundingBoxAt(note.getNoteHeadBeginX()));
+    const left = Math.min(...bounds.map((bound) => bound.getX()));
+    const right = Math.max(...bounds.map((bound) => bound.getX() + bound.getW()));
+    const top = Math.min(...bounds.map((bound) => bound.getY()));
+    const bottom = Math.max(...bounds.map((bound) => bound.getY() + bound.getH()));
+    return { left, right, top, bottom };
+  }
+
+  private getAccidentalBounds(note: StaveNote): GraceNoteSlurBounds[] {
+    return note.getModifiersByType(Category.Accidental).map((accidental) => {
+      const index = accidental.getIndex() ?? 0;
+      const start = note.getModifierStartXY(accidental.getPosition(), index);
+      const metrics = accidental.getTextMetrics();
+      const left = start.x - accidental.getWidth() + accidental.getXShift();
+      const top = start.y - metrics.actualBoundingBoxAscent + accidental.getYShift();
+      return {
+        left,
+        right: left + accidental.getWidth(),
+        top,
+        bottom: top + metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
+      };
+    });
+  }
+
+  private clearSlurFromAccidentals(note: StaveNote): void {
+    if (!(this.slur instanceof StaveTie)) return;
+
+    const accidentalBounds = this.getAccidentalBounds(note);
+    if (accidentalBounds.length === 0) return;
+
+    const baseCp1 = this.slur.renderOptions.cp1;
+    const baseCp2 = this.slur.renderOptions.cp2;
+    const clearanceStep = Tables.STAVE_LINE_DISTANCE;
+    for (let step = 0; step <= 8; step++) {
+      this.slur.renderOptions.cp1 = baseCp1 + step * clearanceStep;
+      this.slur.renderOptions.cp2 = baseCp2 + step * clearanceStep;
+      const curves = this.slur.getRenderedTieCurves();
+      if (!curves.some((curve) => accidentalBounds.some((bounds) => curveIntersectsBounds(curve, bounds)))) return;
+    }
+  }
+
   /** Return the finalized grace slur, once the group has been laid out. */
   getSlur(): StaveTie | TabTie | undefined {
     return this.slur;
@@ -234,7 +294,9 @@ export class GraceNoteGroup extends Modifier {
     const startIndex = notes.firstIndexes?.[0] ?? 0;
     const endIndex = notes.lastIndexes?.[0] ?? 0;
     const start = notes.firstNote.getSelectedNoteHeadBounds(startIndex);
-    const end = notes.lastNote.getSelectedNoteHeadBounds(endIndex);
+    const end = notes.lastNote.isChord()
+      ? this.getNoteHeadSpan(notes.lastNote)
+      : notes.lastNote.getSelectedNoteHeadBounds(endIndex);
     const startNotehead: GraceNoteSlurBounds = {
       left: start.left,
       right: start.right,
@@ -253,18 +315,7 @@ export class GraceNoteGroup extends Modifier {
       ['start-notehead', startNotehead],
       ['end-notehead', endNotehead],
     ] as const) {
-      const intersects = curves.some((curve) => {
-        for (let sample = 1; sample < 24; sample++) {
-          const t = sample / 24;
-          if (
-            pointInsideBounds(quadraticPoint(curve.start, curve.topControl, curve.end, t), bounds) ||
-            pointInsideBounds(quadraticPoint(curve.start, curve.bottomControl, curve.end, t), bounds)
-          ) {
-            return true;
-          }
-        }
-        return false;
-      });
+      const intersects = curves.some((curve) => curveIntersectsBounds(curve, bounds));
       if (intersects) intersectedEndpointIds.push(id);
     }
     return {
@@ -278,6 +329,26 @@ export class GraceNoteGroup extends Modifier {
     };
   }
 
+  private compactGraceNotesAgainstAccidentals(note: Note): void {
+    if (!this.showSlur || !isStaveNote(note) || this.position !== Modifier.Position.LEFT) return;
+
+    const accidentalBounds = this.getAccidentalBounds(note);
+    if (accidentalBounds.length === 0) return;
+
+    const graceNote = this.getGraceNotes().at(-1);
+    if (!graceNote) return;
+
+    const padding = Metrics.get('Accidental.noteheadAccidentalPadding');
+    const desiredRight = Math.min(...accidentalBounds.map((bounds) => bounds.left)) - padding;
+    const shift = desiredRight - graceNote.getTieRightX();
+    if (Math.abs(shift) < 0.001) return;
+
+    this.getGraceNotes().forEach((note) => {
+      const tickContext = note.getTickContext();
+      tickContext.setXOffset(tickContext.getXOffset() + shift);
+    });
+  }
+
   override draw(): void {
     const ctx: RenderContext = this.checkContext();
     const note = this.checkAttachedNote();
@@ -286,6 +357,7 @@ export class GraceNoteGroup extends Modifier {
     L('Drawing grace note group for:', note);
 
     this.alignSubNotesWithNote(this.getGraceNotes(), note, this.position); // Modifier function
+    this.compactGraceNotesAgainstAccidentals(note);
 
     // Draw grace notes.
     this.graceNotes.forEach((graceNote) => graceNote.setContext(ctx).drawWithStyle());
@@ -347,8 +419,8 @@ export class GraceNoteGroup extends Modifier {
         attachStemTip('start', slurStartNote, this.slur.getFirstX(), graceY + yShift);
         attachStemTip('end', note, this.slur.getLastX(), mainY + yShift);
         if (this.slurEndAttachment === 'notehead') {
-          const mainNotehead = note.getSelectedNoteHeadBounds(0);
-          this.slur.renderOptions.lastXShift = mainNotehead.centerX - this.slur.getLastX();
+          const mainNotehead = this.getNoteHeadSpan(note);
+          this.slur.renderOptions.lastXShift = (mainNotehead.left + mainNotehead.right) / 2 - this.slur.getLastX();
           this.slurEndAttachment = 'notehead-center';
         }
         if (this.slurStartIndex < this.graceNotes.length - 1) {
@@ -366,6 +438,7 @@ export class GraceNoteGroup extends Modifier {
         }
       }
       if (this.slurStartIndex >= this.graceNotes.length - 1) this.slur.renderOptions.cp2 = 12;
+      if (this.slur instanceof StaveTie && isStavenote) this.clearSlurFromAccidentals(note);
       this.slur.setContext(ctx).drawWithStyle();
     }
   }
