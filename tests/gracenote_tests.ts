@@ -19,6 +19,33 @@ import { GraceNote, GraceNoteStruct } from '../src/gracenote';
 import { GraceNoteGroup } from '../src/gracenotegroup';
 import { StaveNote, StaveNoteStruct } from '../src/stavenote';
 
+function curveIntersectsBounds(
+  curve: {
+    start: { x: number; y: number };
+    topControl: { x: number; y: number };
+    end: { x: number; y: number };
+    bottomControl: { x: number; y: number };
+  },
+  bounds: { left: number; right: number; top: number; bottom: number }
+): boolean {
+  for (let sample = 1; sample < 24; sample++) {
+    const t = sample / 24;
+    const oneMinusT = 1 - t;
+    const points = [curve.topControl, curve.bottomControl].map((control) => ({
+      x: oneMinusT * oneMinusT * curve.start.x + 2 * oneMinusT * t * control.x + t * t * curve.end.x,
+      y: oneMinusT * oneMinusT * curve.start.y + 2 * oneMinusT * t * control.y + t * t * curve.end.y,
+    }));
+    if (
+      points.some(
+        (point) => point.x > bounds.left && point.x < bounds.right && point.y > bounds.top && point.y < bounds.bottom
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const GraceNoteTests = {
   Start(): void {
     QUnit.module('Grace Notes');
@@ -192,24 +219,24 @@ function basicSlurred(options: TestOptions): void {
   Dot.buildAndAttach([gracenotes4[0]], { all: true });
 
   const firstGraceGroup = f.GraceNoteGroup({ notes: gracenotes0, slur: true, slurStartIndex: 0 }).beamNotes();
+  const secondGraceGroup = f.GraceNoteGroup({ notes: gracenotes1, slur: true }).beamNotes();
+  const thirdGraceGroup = f.GraceNoteGroup({ notes: gracenotes2, slur: true }).beamNotes();
+  const fourthGraceGroup = f.GraceNoteGroup({ notes: gracenotes3, slur: true }).beamNotes();
+  const fifthGraceGroup = f.GraceNoteGroup({ notes: gracenotes4, slur: true }).beamNotes();
   const steepGraceNotes = [{ keys: ['e/6'], duration: '8', stemDirection: 1 }].map(f.GraceNote.bind(f));
   const steepGraceGroup = f.GraceNoteGroup({ notes: steepGraceNotes, slur: true });
   const steepMainNote = f.StaveNote({ keys: ['a/4'], duration: '4', stemDirection: 1 });
+  const secondMainNote = f.StaveNote({ keys: ['c/5'], duration: '4', autoStem: true });
+  const secondAccidental = f.Accidental({ type: '#' });
+  const thirdMainNote = f.StaveNote({ keys: ['c/5', 'd/5'], duration: '4', autoStem: true });
+  const fourthMainNote = f.StaveNote({ keys: ['a/4'], duration: '4', autoStem: true });
+  const fifthMainNote = f.StaveNote({ keys: ['a/4'], duration: '4', autoStem: true });
   const notes = [
     f.StaveNote({ keys: ['b/4'], duration: '4', autoStem: true }).addModifier(firstGraceGroup, 0),
-    f
-      .StaveNote({ keys: ['c/5'], duration: '4', autoStem: true })
-      .addModifier(f.Accidental({ type: '#' }), 0)
-      .addModifier(f.GraceNoteGroup({ notes: gracenotes1, slur: true }).beamNotes(), 0),
-    f
-      .StaveNote({ keys: ['c/5', 'd/5'], duration: '4', autoStem: true })
-      .addModifier(f.GraceNoteGroup({ notes: gracenotes2, slur: true }).beamNotes(), 0),
-    f
-      .StaveNote({ keys: ['a/4'], duration: '4', autoStem: true })
-      .addModifier(f.GraceNoteGroup({ notes: gracenotes3, slur: true }).beamNotes(), 0),
-    f
-      .StaveNote({ keys: ['a/4'], duration: '4', autoStem: true })
-      .addModifier(f.GraceNoteGroup({ notes: gracenotes4, slur: true }).beamNotes(), 0),
+    secondMainNote.addModifier(secondAccidental, 0).addModifier(secondGraceGroup, 0),
+    thirdMainNote.addModifier(thirdGraceGroup, 0),
+    fourthMainNote.addModifier(fourthGraceGroup, 0),
+    fifthMainNote.addModifier(fifthGraceGroup, 0),
     steepMainNote.addModifier(steepGraceGroup, 0),
   ];
 
@@ -235,6 +262,44 @@ function basicSlurred(options: TestOptions): void {
     (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.intersectedEndpointIds,
     [],
     'slur does not cross either connected notehead'
+  );
+  options.assert.strictEqual(
+    fourthGraceGroup.getSlur()?.getNotes().firstNote,
+    gracenotes3[0],
+    'the fourth-quarter slur includes every grace note in the group'
+  );
+  options.assert.strictEqual(
+    fifthGraceGroup.getSlur()?.getNotes().firstNote,
+    gracenotes4[0],
+    'the fifth-quarter slur includes every grace note in the group'
+  );
+
+  const thirdCurve = thirdGraceGroup.getRenderedSlurCurves()[0];
+  const thirdHeadBounds = thirdMainNote.noteHeads.map((noteHead) =>
+    noteHead.getBoundingBoxAt(thirdMainNote.getNoteHeadBeginX())
+  );
+  const thirdChordLeft = Math.min(...thirdHeadBounds.map((bounds) => bounds.getX()));
+  const thirdChordRight = Math.max(...thirdHeadBounds.map((bounds) => bounds.getX() + bounds.getW()));
+  options.assert.ok(
+    Math.abs(thirdCurve.end.x - (thirdChordLeft + thirdChordRight) / 2) < 0.001,
+    'the chord-ending slur attaches at the visual center of the chord'
+  );
+
+  const secondAccidentalBounds = secondAccidental.getBoundingBox();
+  const secondGraceRight = gracenotes1[0].getTieRightX();
+  options.assert.ok(
+    secondAccidentalBounds.getX() - secondGraceRight <= 1.001,
+    'the grace group uses compact spacing before the parent accidental'
+  );
+  const secondAccidentalRect = {
+    left: secondAccidentalBounds.getX(),
+    right: secondAccidentalBounds.getX() + secondAccidentalBounds.getW(),
+    top: secondAccidentalBounds.getY(),
+    bottom: secondAccidentalBounds.getY() + secondAccidentalBounds.getH(),
+  };
+  options.assert.notOk(
+    secondGraceGroup.getRenderedSlurCurves().some((curve) => curveIntersectsBounds(curve, secondAccidentalRect)),
+    'the second-quarter slur clears the parent accidental'
   );
   options.assert.strictEqual(
     (steepGraceGroup as GraceNoteGroup).getSlurLayout()?.direction,
