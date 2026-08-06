@@ -16,7 +16,7 @@ import { KeySignature } from '../src/keysignature';
 import { Modifier } from '../src/modifier';
 import { ContextBuilder } from '../src/renderer';
 import { Stave } from '../src/stave';
-import { Barline, BarlineType } from '../src/stavebarline';
+import { Barline, BarlineType, RepeatBracketType } from '../src/stavebarline';
 import { StaveModifier } from '../src/stavemodifier';
 import { StaveNote } from '../src/stavenote';
 import { Repetition } from '../src/staverepetition';
@@ -289,6 +289,7 @@ function drawEndModifiers(options: TestOptions, contextBuilder: ContextBuilder):
   const blockHeight = 80;
   let x = 10;
   let y = 0;
+  let bracketType:RepeatBracketType = RepeatBracketType.NONE;
 
   const ctx = contextBuilder(options.elementId, 800, 700);
 
@@ -299,7 +300,7 @@ function drawEndModifiers(options: TestOptions, contextBuilder: ContextBuilder):
       const staveBar = new Stave(x, y, width - 10);
       if (begMods) {
         if (begMods.barLine !== undefined) {
-          staveBar.setBegBarType(begMods.barLine);
+          staveBar.setBegBarType(begMods.barLine, bracketType);
         }
         if (begMods.clef !== undefined) {
           staveBar.addClef(begMods.clef);
@@ -314,7 +315,7 @@ function drawEndModifiers(options: TestOptions, contextBuilder: ContextBuilder):
 
       if (endMods) {
         if (endMods.barLine !== undefined) {
-          staveBar.setEndBarType(endMods.barLine);
+          staveBar.setEndBarType(endMods.barLine, bracketType);
         }
         if (endMods.clef !== undefined) {
           staveBar.addEndClef(endMods.clef);
@@ -397,10 +398,12 @@ function drawEndModifiers(options: TestOptions, contextBuilder: ContextBuilder):
   y += blockHeight + 10;
   x = 10;
   // Third pair of staves, with "two dot" repeat barlines.
+  bracketType = RepeatBracketType.STRAIGHT;
   drawStavesInTwoLines(BarlineType.REPEAT_END);
 
   y += blockHeight + 10;
   x = 10;
+  bracketType = RepeatBracketType.CURVED;
   // Fourth pair of staves, with "two dots" on each side of the barlines.
   drawStavesInTwoLines(BarlineType.REPEAT_BOTH);
 }
