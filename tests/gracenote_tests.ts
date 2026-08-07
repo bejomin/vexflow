@@ -18,6 +18,7 @@ import { Formatter } from '../src/formatter';
 import { GraceNote, GraceNoteStruct } from '../src/gracenote';
 import { GraceNoteGroup } from '../src/gracenotegroup';
 import { StaveNote, StaveNoteStruct } from '../src/stavenote';
+import { Tables } from '../src/tables';
 
 function curveIntersectsBounds(
   curve: {
@@ -44,6 +45,36 @@ function curveIntersectsBounds(
     }
   }
   return false;
+}
+
+function graceNoteRightEdge(note: StaveNote): number {
+  let right = note.getTieRightX();
+  if (note.shouldDrawFlag()) {
+    right = Math.max(right, note.getStemX() - Tables.STEM_WIDTH / 2 + note.getGlyphWidth());
+  }
+  note.getModifiersByType(Dot.CATEGORY).forEach((dot) => {
+    const index = dot.getIndex() ?? 0;
+    const start = note.getModifierStartXY(ModifierPosition.RIGHT, index, { forceFlagRight: true });
+    right = Math.max(right, start.x + dot.getXShift() + dot.getWidth());
+  });
+  return right;
+}
+
+function graceNoteLeftEdge(note: StaveNote): number {
+  const accidentals = note.getModifiersByType(Accidental.CATEGORY);
+  if (accidentals.length > 0) {
+    return Math.min(...accidentals.map((accidental) => accidental.getBoundingBox().getX()));
+  }
+  return Math.min(
+    ...note.noteHeads.map((noteHead) => {
+      const bounds = noteHead.getBoundingBoxAt(note.getNoteHeadBeginX());
+      return bounds.getX();
+    })
+  );
+}
+
+function noteheadLeftEdge(note: StaveNote): number {
+  return Math.min(...note.noteHeads.map((noteHead) => noteHead.getBoundingBoxAt(note.getNoteHeadBeginX()).getX()));
 }
 
 const GraceNoteTests = {
@@ -257,6 +288,15 @@ function basicSlurred(options: TestOptions): void {
       ? Math.min(curve.start.y, curve.end.y) - curveMidpointY
       : curveMidpointY - Math.max(curve.start.y, curve.end.y);
   options.assert.ok(curve.start.x < curve.end.x, 'slur follows the left-to-right musical order');
+  options.assert.strictEqual(
+    (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.startAttachment,
+    'notehead-center',
+    'slur starts at the optical center of the first grace notehead'
+  );
+  options.assert.ok(
+    Math.abs(curve.start.x - gracenotes0[0].getSelectedNoteHeadBounds(0).centerX) < 0.001,
+    'slur onset uses the optical center of the first grace notehead'
+  );
   options.assert.ok(beamClearance >= 5.9, 'a source-spanning grace slur clears the beamed grace notes');
   options.assert.deepEqual(
     (firstGraceGroup as GraceNoteGroup).getSlurLayout()?.intersectedEndpointIds,
@@ -273,20 +313,61 @@ function basicSlurred(options: TestOptions): void {
     gracenotes4[0],
     'the fifth-quarter slur includes every grace note in the group'
   );
+  options.assert.ok(
+    graceNoteLeftEdge(gracenotes4[1]) - graceNoteRightEdge(gracenotes4[0]) >= 2 * StaveNote.minNoteheadPadding - 0.001,
+    'the dotted fifth-quarter grace note leaves room before the next grace notehead'
+  );
 
   const thirdCurve = thirdGraceGroup.getRenderedSlurCurves()[0];
   const thirdHeadBounds = thirdMainNote.noteHeads.map((noteHead) =>
     noteHead.getBoundingBoxAt(thirdMainNote.getNoteHeadBeginX())
   );
   const thirdChordLeft = Math.min(...thirdHeadBounds.map((bounds) => bounds.getX()));
-  const thirdChordRight = Math.max(...thirdHeadBounds.map((bounds) => bounds.getX() + bounds.getW()));
+  const thirdChordRightmostCenter = Math.max(...thirdHeadBounds.map((bounds) => bounds.getX() + bounds.getW() / 2));
   options.assert.ok(
-    Math.abs(thirdCurve.end.x - (thirdChordLeft + thirdChordRight) / 2) < 0.001,
-    'the chord-ending slur attaches at the visual center of the chord'
+    Math.abs(thirdCurve.end.x - thirdChordRightmostCenter) < 0.001,
+    'the chord-ending slur attaches at the visual center of the rightmost chord note'
+  );
+  options.assert.notOk(
+    curveIntersectsBounds(thirdCurve, {
+      left: thirdHeadBounds[1].getX(),
+      right: thirdHeadBounds[1].getX() + thirdHeadBounds[1].getW(),
+      top: thirdHeadBounds[1].getY(),
+      bottom: thirdHeadBounds[1].getY() + thirdHeadBounds[1].getH(),
+    }),
+    'the third-quarter slur clears the rightmost chord notehead'
+  );
+
+  const firstGraceSharp = gracenotes0[1].getModifiersByType(Accidental.CATEGORY)[0];
+  const fourthGraceNatural = gracenotes3[2].getModifiersByType(Accidental.CATEGORY)[0];
+  options.assert.ok(
+    firstGraceSharp.getBoundingBox().getX() - graceNoteRightEdge(gracenotes0[0]) <=
+      StaveNote.minNoteheadPadding + 0.001,
+    'the first-quarter grace sharp does not add unnecessary leading whitespace'
+  );
+  options.assert.ok(
+    fourthGraceNatural.getBoundingBox().getX() - graceNoteRightEdge(gracenotes3[1]) <=
+      StaveNote.minNoteheadPadding + 0.001,
+    'the fourth-quarter grace natural does not add unnecessary leading whitespace'
+  );
+  const minimumGraceGroupEndGap = 1.5 * StaveNote.minNoteheadPadding - 0.001;
+  options.assert.ok(
+    noteheadLeftEdge(notes[0]) - graceNoteRightEdge(gracenotes0[gracenotes0.length - 1]) >= minimumGraceGroupEndGap,
+    'the first-quarter grace group leaves a small end gap before the parent notehead'
+  );
+  options.assert.ok(
+    noteheadLeftEdge(fourthMainNote) - graceNoteRightEdge(gracenotes3[gracenotes3.length - 1]) >=
+      minimumGraceGroupEndGap,
+    'the fourth-quarter grace group leaves a small end gap before the parent notehead'
+  );
+  options.assert.ok(
+    noteheadLeftEdge(fifthMainNote) - graceNoteRightEdge(gracenotes4[gracenotes4.length - 1]) >=
+      minimumGraceGroupEndGap,
+    'the fifth-quarter grace group leaves a small end gap before the parent notehead'
   );
 
   const secondAccidentalBounds = secondAccidental.getBoundingBox();
-  const secondGraceRight = gracenotes1[0].getTieRightX();
+  const secondGraceRight = graceNoteRightEdge(gracenotes1[0]);
   options.assert.ok(
     secondAccidentalBounds.getX() - secondGraceRight <= 1.001,
     'the grace group uses compact spacing before the parent accidental'
@@ -300,6 +381,10 @@ function basicSlurred(options: TestOptions): void {
   options.assert.notOk(
     secondGraceGroup.getRenderedSlurCurves().some((curve) => curveIntersectsBounds(curve, secondAccidentalRect)),
     'the second-quarter slur clears the parent accidental'
+  );
+  options.assert.ok(
+    thirdChordLeft - graceNoteRightEdge(gracenotes2[0]) >= StaveNote.minNoteheadPadding - 0.001,
+    'the third-quarter grace flag clears the chord'
   );
   options.assert.strictEqual(
     (steepGraceGroup as GraceNoteGroup).getSlurLayout()?.direction,
@@ -325,6 +410,15 @@ function basicSlurred(options: TestOptions): void {
   options.assert.ok(
     Math.abs((steepCurve?.end.y ?? 0) - steepMainNote.getStemExtents().topY) < 0.001,
     'steep slur ends at the main stem tip y position'
+  );
+  const steepEndpointSeparation = Math.abs((steepCurve?.end.y ?? 0) - (steepCurve?.start.y ?? 0));
+  const steepControlClearance =
+    steepLayout?.direction === -1
+      ? ((steepCurve?.start.y ?? 0) + (steepCurve?.end.y ?? 0)) / 2 - (steepCurve?.topControl.y ?? 0)
+      : (steepCurve?.topControl.y ?? 0) - ((steepCurve?.start.y ?? 0) + (steepCurve?.end.y ?? 0)) / 2;
+  options.assert.ok(
+    steepControlClearance >= steepEndpointSeparation / 2 - 0.001,
+    'steep slur curvature scales with endpoint separation'
   );
 }
 

@@ -17,7 +17,7 @@ import { StaveTie, TieRenderCurve } from './stavetie';
 import { StemmableNote } from './stemmablenote';
 import { Tables } from './tables';
 import { TabTie } from './tabtie';
-import { Category, isStaveNote } from './typeguard';
+import { Category, isStaveNote, isTabNote } from './typeguard';
 import { log } from './util';
 import { Voice } from './voice';
 
@@ -236,6 +236,26 @@ export class GraceNoteGroup extends Modifier {
     return { left, right, top, bottom };
   }
 
+  private getRightmostNoteHead(note: StaveNote): GraceNoteSlurBounds {
+    return note.noteHeads
+      .map((noteHead) => noteHead.getBoundingBoxAt(note.getNoteHeadBeginX()))
+      .map((bounds) => ({
+        left: bounds.getX(),
+        right: bounds.getX() + bounds.getW(),
+        top: bounds.getY(),
+        bottom: bounds.getY() + bounds.getH(),
+      }))
+      .reduce((rightmost, bounds) => {
+        const rightmostCenter = (rightmost.left + rightmost.right) / 2;
+        const center = (bounds.left + bounds.right) / 2;
+        return center > rightmostCenter ? bounds : rightmost;
+      });
+  }
+
+  private getSlurEndNoteHead(note: StaveNote): GraceNoteSlurBounds {
+    return note.isChord() ? this.getRightmostNoteHead(note) : this.getNoteHeadSpan(note);
+  }
+
   private getAccidentalBounds(note: StaveNote): GraceNoteSlurBounds[] {
     return note.getModifiersByType(Category.Accidental).map((accidental) => {
       const index = accidental.getIndex() ?? 0;
@@ -295,7 +315,7 @@ export class GraceNoteGroup extends Modifier {
     const endIndex = notes.lastIndexes?.[0] ?? 0;
     const start = notes.firstNote.getSelectedNoteHeadBounds(startIndex);
     const end = notes.lastNote.isChord()
-      ? this.getNoteHeadSpan(notes.lastNote)
+      ? this.getRightmostNoteHead(notes.lastNote)
       : notes.lastNote.getSelectedNoteHeadBounds(endIndex);
     const startNotehead: GraceNoteSlurBounds = {
       left: start.left,
@@ -329,22 +349,88 @@ export class GraceNoteGroup extends Modifier {
     };
   }
 
-  private compactGraceNotesAgainstAccidentals(note: Note): void {
-    if (!this.showSlur || !isStaveNote(note) || this.position !== Modifier.Position.LEFT) return;
+  private getGraceNoteRightEdge(note: Note): number {
+    if (isTabNote(note)) return note.getAbsoluteX() + note.getWidth() / 2;
 
-    const accidentalBounds = this.getAccidentalBounds(note);
-    if (accidentalBounds.length === 0) return;
+    let right = note.getTieRightX();
+    if (isStaveNote(note) && note.shouldDrawFlag()) {
+      right = Math.max(right, note.getStemX() - Tables.STEM_WIDTH / 2 + note.getGlyphWidth());
+    }
+    if (isStaveNote(note)) {
+      note.getModifiersByType(Category.Dot).forEach((dot) => {
+        const index = dot.getIndex() ?? 0;
+        const start = note.getModifierStartXY(Modifier.Position.RIGHT, index, { forceFlagRight: true });
+        right = Math.max(right, start.x + dot.getXShift() + dot.getWidth());
+      });
+    }
+    return right;
+  }
 
-    const graceNote = this.getGraceNotes().at(-1);
-    if (!graceNote) return;
+  private getGraceNoteLeftEdge(note: Note): number {
+    if (isStaveNote(note)) {
+      const accidentalBounds = this.getAccidentalBounds(note);
+      return accidentalBounds.length > 0
+        ? Math.min(...accidentalBounds.map((bounds) => bounds.left))
+        : this.getNoteHeadSpan(note).left;
+    }
+    if (isTabNote(note)) return note.getAbsoluteX() - note.getWidth() / 2;
+    return note.getAbsoluteX();
+  }
 
-    const padding = Metrics.get('Accidental.noteheadAccidentalPadding');
-    const desiredRight = Math.min(...accidentalBounds.map((bounds) => bounds.left)) - padding;
-    const shift = desiredRight - graceNote.getTieRightX();
+  private getGraceNoteSpacingAfter(note: Note): number {
+    if (isStaveNote(note) && note.getModifiersByType(Category.Dot).length > 0) {
+      return 2 * StaveNote.minNoteheadPadding;
+    }
+    return StaveNote.minNoteheadPadding;
+  }
+
+  private spaceGraceNotesWithinGroup(): void {
+    const graceNotes = this.getGraceNotes();
+    for (let i = 1; i < graceNotes.length; i++) {
+      const currentGraceNote = graceNotes[i];
+      const previousRight = this.getGraceNoteRightEdge(graceNotes[i - 1]);
+      const currentLeft = this.getGraceNoteLeftEdge(currentGraceNote);
+      const desiredLeft = previousRight + this.getGraceNoteSpacingAfter(graceNotes[i - 1]);
+      const hasAccidental = isStaveNote(currentGraceNote) && this.getAccidentalBounds(currentGraceNote).length > 0;
+      const shift = desiredLeft - currentLeft;
+      if (shift < 0 && !hasAccidental) continue;
+      if (shift === 0) continue;
+
+      for (let j = i; j < graceNotes.length; j++) {
+        const tickContext = graceNotes[j].getTickContext();
+        tickContext.setXOffset(tickContext.getXOffset() + shift);
+      }
+    }
+  }
+
+  private spaceGraceNotesBeforeParent(note: Note): void {
+    if (!this.showSlur || this.position !== Modifier.Position.LEFT) return;
+
+    let parentLeft: number;
+    let padding = StaveNote.minNoteheadPadding;
+    if (isStaveNote(note)) {
+      const accidentalBounds = this.getAccidentalBounds(note);
+      if (accidentalBounds.length > 0) {
+        parentLeft = Math.min(...accidentalBounds.map((bounds) => bounds.left));
+        padding = Metrics.get('Accidental.noteheadAccidentalPadding');
+      } else {
+        parentLeft = this.getNoteHeadSpan(note).left;
+      }
+    } else if (isTabNote(note)) {
+      parentLeft = note.getAbsoluteX() - note.getWidth() / 2;
+    } else {
+      return;
+    }
+
+    const graceNotes = this.getGraceNotes();
+    const currentRight = Math.max(...graceNotes.map((graceNote) => this.getGraceNoteRightEdge(graceNote)));
+    const extraEndPadding = graceNotes.length > 1 ? StaveNote.minNoteheadPadding / 2 : 0;
+    const desiredRight = parentLeft - padding - extraEndPadding;
+    const shift = desiredRight - currentRight;
     if (Math.abs(shift) < 0.001) return;
 
-    this.getGraceNotes().forEach((note) => {
-      const tickContext = note.getTickContext();
+    graceNotes.forEach((graceNote) => {
+      const tickContext = graceNote.getTickContext();
       tickContext.setXOffset(tickContext.getXOffset() + shift);
     });
   }
@@ -357,7 +443,8 @@ export class GraceNoteGroup extends Modifier {
     L('Drawing grace note group for:', note);
 
     this.alignSubNotesWithNote(this.getGraceNotes(), note, this.position); // Modifier function
-    this.compactGraceNotesAgainstAccidentals(note);
+    this.spaceGraceNotesWithinGroup();
+    this.spaceGraceNotesBeforeParent(note);
 
     // Draw grace notes.
     this.graceNotes.forEach((graceNote) => graceNote.setContext(ctx).drawWithStyle());
@@ -418,11 +505,29 @@ export class GraceNoteGroup extends Modifier {
         const yShift = this.slur.renderOptions.yShift * direction;
         attachStemTip('start', slurStartNote, this.slur.getFirstX(), graceY + yShift);
         attachStemTip('end', note, this.slur.getLastX(), mainY + yShift);
+        if (this.slurStartAttachment === 'notehead' && isStaveNote(slurStartNote)) {
+          const startNotehead = slurStartNote.getSelectedNoteHeadBounds(0);
+          this.slur.renderOptions.firstXShift = startNotehead.centerX - this.slur.getFirstX();
+          this.slurStartAttachment = 'notehead-center';
+        }
         if (this.slurEndAttachment === 'notehead') {
-          const mainNotehead = this.getNoteHeadSpan(note);
+          const mainNotehead = this.getSlurEndNoteHead(note);
           this.slur.renderOptions.lastXShift = (mainNotehead.left + mainNotehead.right) / 2 - this.slur.getLastX();
+          if (note.isChord()) {
+            const clearY =
+              direction < 0
+                ? mainNotehead.top - StaveNote.minNoteheadPadding
+                : mainNotehead.bottom + StaveNote.minNoteheadPadding;
+            this.slur.renderOptions.lastYShift = clearY - (mainY + yShift);
+          }
           this.slurEndAttachment = 'notehead-center';
         }
+        const renderedStartY = graceY + yShift + this.slur.renderOptions.firstYShift;
+        const renderedEndY = mainY + yShift + this.slur.renderOptions.lastYShift;
+        const endpointSeparation = Math.abs(renderedEndY - renderedStartY);
+        const separationBasedControlHeight = endpointSeparation / 2;
+        this.slur.renderOptions.cp1 = Math.max(this.slur.renderOptions.cp1, separationBasedControlHeight);
+        this.slur.renderOptions.cp2 = Math.max(this.slur.renderOptions.cp2, separationBasedControlHeight + 4);
         if (this.slurStartIndex < this.graceNotes.length - 1) {
           // A multi-note grace slur starts at the first source grace stem and
           // must remain visibly above the intervening beam. For a quadratic
@@ -430,14 +535,11 @@ export class GraceNoteGroup extends Modifier {
           // point, so double both the endpoint delta and desired clearance.
           // This keeps the visible inner edge 0.6 staff-spaces outside the
           // higher endpoint even when the gesture is diagonal.
-          const renderedStartY = graceY + yShift + this.slur.renderOptions.firstYShift;
-          const renderedEndY = mainY + yShift + this.slur.renderOptions.lastYShift;
-          const controlHeight = Math.abs(renderedEndY - renderedStartY) + 1.2 * Tables.STAVE_LINE_DISTANCE;
+          const controlHeight = endpointSeparation + 1.2 * Tables.STAVE_LINE_DISTANCE;
           this.slur.renderOptions.cp1 = controlHeight;
           this.slur.renderOptions.cp2 = controlHeight + 4;
         }
       }
-      if (this.slurStartIndex >= this.graceNotes.length - 1) this.slur.renderOptions.cp2 = 12;
       if (this.slur instanceof StaveTie && isStavenote) this.clearSlurFromAccidentals(note);
       this.slur.setContext(ctx).drawWithStyle();
     }

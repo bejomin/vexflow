@@ -101,8 +101,10 @@ function slurred(options: TestOptions, contextBuilder: ContextBuilder): void {
   const gracenotes0 = gracenoteGroup0.map(graceTabNote);
   const gracenotes1 = gracenoteGroup1.map(graceTabNote);
 
-  note0.addModifier(new GraceNoteGroup(gracenotes0, true), 0);
-  note1.addModifier(new GraceNoteGroup(gracenotes1, true), 0);
+  const slurredGroup0 = new GraceNoteGroup(gracenotes0, true);
+  const slurredGroup1 = new GraceNoteGroup(gracenotes1, true);
+  note0.addModifier(slurredGroup0, 0);
+  note1.addModifier(slurredGroup1, 0);
 
   const voice = new Voice(VexFlow.TIME4_4);
   voice.addTickables([note0, note1]);
@@ -111,6 +113,24 @@ function slurred(options: TestOptions, contextBuilder: ContextBuilder): void {
 
   voice.draw(context, stave);
 
+  options.assert.strictEqual(
+    slurredGroup0.getSlur()?.getNotes().firstNote,
+    gracenotes0[0],
+    'the first TAB slur starts at the first grace number'
+  );
+  options.assert.strictEqual(
+    slurredGroup1.getSlur()?.getNotes().firstNote,
+    gracenotes1[0],
+    'the second TAB slur starts at the first grace number'
+  );
+  options.assert.ok(
+    note0.getAbsoluteX() - note0.getWidth() / 2 > gracenotes0[1].getAbsoluteX() + gracenotes0[1].getWidth() / 2,
+    'the first TAB slur leaves the final grace number before the parent'
+  );
+  options.assert.ok(
+    note1.getAbsoluteX() - note1.getWidth() / 2 > gracenotes1[2].getAbsoluteX() + gracenotes1[2].getWidth() / 2,
+    'the second TAB slur leaves the final grace number before the parent'
+  );
   options.assert.ok(true, 'Slurred Test');
 }
 
