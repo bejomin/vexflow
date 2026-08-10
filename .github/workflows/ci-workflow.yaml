@@ -25,7 +25,9 @@ jobs:
       - name: Install Puppeteer-managed Chrome
         env:
           PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-${{ matrix.node-version }}
-        run: npx puppeteer browsers install chrome
+        run: |
+          rm -rf "$PUPPETEER_CACHE_DIR"
+          npx puppeteer browsers install chrome
       - run: npm run lint
       - name: Run tests
         env:
