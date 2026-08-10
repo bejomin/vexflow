@@ -21,16 +21,15 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: npm ci
-      - name: Install Puppeteer-managed Chrome
-        env:
-          PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-${{ matrix.node-version }}
-          PUPPETEER_SKIP_CHROME_HEADLESS_SHELL_DOWNLOAD: "true"
-        run: |
-          rm -rf "$PUPPETEER_CACHE_DIR"
-          node --input-type=module -e "const { downloadBrowsers } = await import('puppeteer/internal/node/install.js'); await downloadBrowsers()"
-          node -e "const fs = require('node:fs'); const puppeteer = require('puppeteer'); const path = puppeteer.executablePath(); fs.accessSync(path, fs.constants.X_OK); console.log(path)"
+      - name: Install stable Chrome for Testing
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+      - name: Verify Chrome
+        run: '"${{ steps.setup-chrome.outputs.chrome-path }}" --version'
       - run: npm run lint
       - name: Run tests
         env:
-          PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-${{ matrix.node-version }}
+          PUPPETEER_EXECUTABLE_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: npm test
