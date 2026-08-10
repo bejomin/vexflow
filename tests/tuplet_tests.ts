@@ -6,6 +6,7 @@
 import { TestOptions, VexFlowTests } from './vexflow_test_helpers';
 
 import { Dot } from '../src/dot';
+import { Element } from '../src/element';
 import { Formatter } from '../src/formatter';
 import { Glyphs } from '../src/glyphs';
 import { Stem } from '../src/stem';
@@ -72,7 +73,7 @@ function repeatedDrawTextPosition(options: TestOptions): void {
   };
 
   tuplet.setContext(ctx).draw();
-  const textElement = (tuplet as any).textElement;
+  const textElement = (tuplet as unknown as { textElement: Element }).textElement;
   const expectedX: number = textElement.getX() + textElement.getXShift();
   options.assert.strictEqual(renderedTextX.length, 1, 'the redraw emits one tuplet-number glyph');
   options.assert.ok(
