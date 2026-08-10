@@ -26,8 +26,8 @@ jobs:
           PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-${{ matrix.node-version }}
         run: |
           rm -rf "$PUPPETEER_CACHE_DIR"
-          npm exec -- puppeteer browsers install chrome
-          node -e "const puppeteer = require('puppeteer'); console.log(puppeteer.executablePath())"
+          node node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js browsers install chrome
+          node -e "const fs = require('node:fs'); const puppeteer = require('puppeteer'); const path = puppeteer.executablePath(); fs.accessSync(path, fs.constants.X_OK); console.log(path)"
       - run: npm run lint
       - name: Run tests
         env:
