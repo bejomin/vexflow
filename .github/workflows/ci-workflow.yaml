@@ -24,9 +24,10 @@ jobs:
       - name: Install Puppeteer-managed Chrome
         env:
           PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-${{ matrix.node-version }}
+          PUPPETEER_SKIP_CHROME_HEADLESS_SHELL_DOWNLOAD: "true"
         run: |
           rm -rf "$PUPPETEER_CACHE_DIR"
-          node node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js browsers install chrome
+          node --input-type=module -e "const { downloadBrowsers } = await import('puppeteer/internal/node/install.js'); await downloadBrowsers()"
           node -e "const fs = require('node:fs'); const puppeteer = require('puppeteer'); const path = puppeteer.executablePath(); fs.accessSync(path, fs.constants.X_OK); console.log(path)"
       - run: npm run lint
       - name: Run tests
