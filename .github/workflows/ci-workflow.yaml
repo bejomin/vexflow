@@ -8,14 +8,13 @@ jobs:
 
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         node-version: [24.x, 26.x]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install dependencies
@@ -27,7 +26,8 @@ jobs:
           PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.puppeteer-${{ matrix.node-version }}
         run: |
           rm -rf "$PUPPETEER_CACHE_DIR"
-          npx puppeteer browsers install chrome
+          npm exec -- puppeteer browsers install chrome
+          node -e "const puppeteer = require('puppeteer'); console.log(puppeteer.executablePath())"
       - run: npm run lint
       - name: Run tests
         env:
