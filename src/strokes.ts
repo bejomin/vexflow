@@ -173,10 +173,26 @@ export class Stroke extends Modifier {
       // Select the wiggle glyph depending on the arrow direction
       const lineGlyph = arrow === Glyphs.arrowheadBlackDown ? Glyphs.wiggleArpeggiatoDown : Glyphs.wiggleArpeggiatoUp;
       let txt = '';
+      let previousTxt = '';
+      let previousWidth = 0;
       const el = new Element();
       // add glyphs until the required length is achieved
       while (el.getWidth() < botY - topY) {
+        previousTxt = txt;
+        previousWidth = el.getWidth();
         txt += lineGlyph;
+        el.setText(txt);
+      }
+      // Directionless arpeggios have no arrow that needs to stay fixed at one
+      // end. Use the closest whole-glyph length, then centre it, so glyph
+      // quantization is shared by both ends instead of accumulating below the
+      // lowest notehead.
+      if (
+        this.type === Stroke.Type.ARPEGGIO_DIRECTIONLESS &&
+        previousTxt &&
+        botY - topY - previousWidth < el.getWidth() - (botY - topY)
+      ) {
+        txt = previousTxt;
         el.setText(txt);
       }
       if (
@@ -184,13 +200,16 @@ export class Stroke extends Modifier {
         this.type === Stroke.Type.ROLL_DOWN ||
         this.type === Stroke.Type.ARPEGGIO_DIRECTIONLESS
       ) {
-        ctx.openRotation(90, x + this.xShift, topY);
-        el.renderText(ctx, x + this.xShift, topY - el.getTextMetrics().actualBoundingBoxDescent + el.getHeight() / 2);
+        const glyphYOffset = -el.getTextMetrics().actualBoundingBoxDescent + el.getHeight() / 2;
+        const rotationY =
+          this.type === Stroke.Type.ARPEGGIO_DIRECTIONLESS ? (topY + botY - el.getWidth()) / 2 - glyphYOffset : topY;
+        ctx.openRotation(90, x + this.xShift, rotationY);
+        el.renderText(ctx, x + this.xShift, rotationY + glyphYOffset);
         ctx.closeRotation();
-        textY = topY + el.getWidth() + 5;
+        textY = rotationY + el.getWidth() + 5;
         this.boundingBox = new BoundingBox(
           x + this.xShift - el.getHeight() / 2,
-          topY - el.getTextMetrics().actualBoundingBoxDescent + el.getHeight() / 2,
+          rotationY + glyphYOffset,
           el.getHeight(),
           el.getWidth()
         );

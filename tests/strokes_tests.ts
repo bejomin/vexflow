@@ -180,8 +180,19 @@ function crossStaffArpeggioEndpoint(options: TestOptions): void {
   const boundingBox = stroke.getBoundingBox();
   const upperY = Math.min(...upperNotes[0].getYs());
   const lowerY = Math.max(...lowerNotes[0].getYs());
+  const upperOverhang = upperY - boundingBox.getY();
+  const lowerOverhang = boundingBox.getY() + boundingBox.getH() - lowerY;
+  const lineSpace = lowerStave.getSpacingBetweenLines();
   options.assert.ok(boundingBox.getY() <= upperY, 'stroke reaches the upper-staff chord');
   options.assert.ok(boundingBox.getY() + boundingBox.getH() >= lowerY, 'stroke reaches the lower-staff chord');
+  options.assert.ok(
+    Math.abs(upperOverhang - lowerOverhang) < 0.001,
+    'whole-glyph rounding is centred between the outer noteheads'
+  );
+  options.assert.ok(
+    upperOverhang <= lineSpace && lowerOverhang <= lineSpace,
+    'stroke extends by no more than one staff space at either end'
+  );
 }
 
 function multiNotationAndTab(options: TestOptions): void {
