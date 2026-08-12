@@ -110,11 +110,17 @@ export class Stroke extends Modifier {
     this.setRendered();
 
     const start = note.getModifierStartXY(this.position, this.index);
-    let yPositions = note.getYs();
     let topY = start.y;
     let botY = start.y;
     const x = start.x - 5;
     const lineSpace = note.checkStave().getSpacingBetweenLines();
+
+    const extendBoundsToNote = (candidate: Note): void => {
+      for (const y of candidate.getYs()) {
+        topY = Math.min(topY, y);
+        botY = Math.max(botY, y);
+      }
+    };
 
     const notes = this.checkModifierContext().getMembers(note.getCategory());
     for (let i = 0; i < notes.length; i++) {
@@ -122,14 +128,13 @@ export class Stroke extends Modifier {
       if (isNote(note)) {
         // Only Note objects have getYs().
         // note is an instance of either StaveNote or TabNote.
-        yPositions = note.getYs();
-        for (let n = 0; n < yPositions.length; n++) {
-          if (this.note === notes[i] || this.allVoices) {
-            topY = Math.min(topY, yPositions[n]);
-            botY = Math.max(botY, yPositions[n]);
-          }
+        if (this.note === notes[i] || this.allVoices) {
+          extendBoundsToNote(note);
         }
       }
+    }
+    if (this.noteEnd && this.noteEnd !== note) {
+      extendBoundsToNote(this.noteEnd);
     }
 
     let arrow = '';
