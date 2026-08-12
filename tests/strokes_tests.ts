@@ -16,6 +16,7 @@ const StrokesTests = {
     run('Brush/Roll/Rasgueado - bounding box', brushRollRasgueado, { drawBoundingBox: true });
     run('Arpeggio directionless (without arrows)', arpeggioDirectionless);
     run('Multi Voice', multiVoice);
+    run('Cross-staff arpeggio endpoint', crossStaffArpeggioEndpoint);
     run('Notation and Tab', notesWithTab);
     run('Multi-Voice Notation and Tab', multiNotationAndTab);
   },
@@ -156,6 +157,42 @@ function multiVoice(options: TestOptions): void {
   f.draw();
 
   options.assert.ok(true, 'Strokes Test Multi Voice');
+}
+
+function crossStaffArpeggioEndpoint(options: TestOptions): void {
+  const f = VexFlowTests.makeFactory(options, 500, 300);
+  const score = f.EasyScore();
+  const upperStave = f.Stave({ x: 70, y: 20, width: 360 }).addClef('treble');
+  const lowerStave = f.Stave({ x: 70, y: 150, width: 360 }).addClef('bass');
+  lowerStave.setNoteStartX(upperStave.getNoteStartX());
+
+  const upperNotes = score.notes('(c4 e4 c5)/2, b4/2', { stem: 'up' });
+  const lowerNotes = score.notes('(c2 g2 e3)/2, d3/2', { clef: 'bass', stem: 'up' });
+  const stroke = new Stroke(Stroke.Type.ARPEGGIO_DIRECTIONLESS, { allVoices: false }).addEndNote(upperNotes[0]);
+  lowerNotes[0].addStroke(0, stroke);
+
+  const upperVoice = score.voice(upperNotes);
+  const lowerVoice = score.voice(lowerNotes);
+  f.Formatter().joinVoices([upperVoice]).formatToStave([upperVoice], upperStave);
+  f.Formatter().joinVoices([lowerVoice]).formatToStave([lowerVoice], lowerStave);
+  f.draw();
+
+  const boundingBox = stroke.getBoundingBox();
+  const upperY = Math.min(...upperNotes[0].getYs());
+  const lowerY = Math.max(...lowerNotes[0].getYs());
+  const upperOverhang = upperY - boundingBox.getY();
+  const lowerOverhang = boundingBox.getY() + boundingBox.getH() - lowerY;
+  const lineSpace = lowerStave.getSpacingBetweenLines();
+  options.assert.ok(boundingBox.getY() <= upperY, 'stroke reaches the upper-staff chord');
+  options.assert.ok(boundingBox.getY() + boundingBox.getH() >= lowerY, 'stroke reaches the lower-staff chord');
+  options.assert.ok(
+    Math.abs(upperOverhang - lowerOverhang) < 0.001,
+    'whole-glyph rounding is centred between the outer noteheads'
+  );
+  options.assert.ok(
+    upperOverhang <= lineSpace && lowerOverhang <= lineSpace,
+    'stroke extends by no more than one staff space at either end'
+  );
 }
 
 function multiNotationAndTab(options: TestOptions): void {
