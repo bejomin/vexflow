@@ -44,6 +44,7 @@ const StaveNoteTests = {
     QUnit.test('TickContext', tickContext);
     QUnit.test('Directional layout padding', directionalLayoutPadding);
     QUnit.test('Named layout padding', namedLayoutPadding);
+    QUnit.test('Rendered ledger line geometry', renderedLedgerLineGeometry);
 
     const run = VexFlowTests.runTests;
     run('StaveNote Draw - Treble', drawBasic, { clef: 'treble', octaveShift: 0, restKey: 'r/4' });
@@ -168,6 +169,28 @@ function ticks(assert: Assert): void {
     /BadArguments/,
     "Invalid note type 'Z' throws BadArguments exception"
   );
+}
+
+function renderedLedgerLineGeometry(assert: Assert): void {
+  const stave = new Stave(10, 10, 380);
+  const note = new StaveNote({ keys: ['c/6', 'd/6'], duration: 'q', stemDirection: Stem.DOWN });
+  note.setStave(stave);
+  new TickContext().addTickable(note).preFormat().setX(120);
+
+  const segments = note.getRenderedLedgerLineSegments();
+  assert.ok(segments.length > 0, 'notes above the stave expose their ledger lines');
+  assert.ok(
+    segments.every((segment) => segment.x2 > segment.x1 && segment.y1 === segment.y2),
+    'every ledger is a finite horizontal segment'
+  );
+  assert.deepEqual(
+    segments.map((segment) => segment.y1),
+    segments.map((segment) => stave.getYForNote(segment.line)),
+    'reported coordinates use the same stave positions as drawing'
+  );
+
+  const rest = new StaveNote({ keys: ['b/4'], duration: 'qr' }).setStave(stave);
+  assert.deepEqual(rest.getRenderedLedgerLineSegments(), [], 'rests expose no ledger geometry');
 }
 
 function ticksNewAPI(assert: Assert): void {

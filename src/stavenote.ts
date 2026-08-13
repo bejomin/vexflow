@@ -50,6 +50,15 @@ export interface StaveNoteSelectedNoteHeadBounds {
   displaced: boolean;
 }
 
+/** Exact line segments used to draw this note's ledger lines. */
+export interface StaveNoteLedgerLineSegment {
+  line: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 export interface StaveNoteFormatSettings {
   line: number;
   maxLine: number;
@@ -1083,20 +1092,16 @@ export class StaveNote extends StemmableNote {
     };
   }
 
-  // Draw the ledger lines between the stave and the highest/lowest keys
-  drawLedgerLines(): void {
+  /** Return the finalized ledger-line geometry used by {@link drawLedgerLines}. */
+  getRenderedLedgerLineSegments(): StaveNoteLedgerLineSegment[] {
     const stave = this.checkStave();
     const {
       renderOptions: { strokePx },
     } = this;
-    const ctx = this.checkContext();
     const width = this.getGlyphWidth() + strokePx * 2;
     const doubleWidth = 2 * (this.getGlyphWidth() + strokePx) - Stem.WIDTH / 2;
 
-    if (this.isRest()) return;
-    if (!ctx) {
-      throw new RuntimeError('NoCanvasContext', "Can't draw without a canvas context.");
-    }
+    if (this.isRest()) return [];
 
     const {
       highestLine,
@@ -1110,39 +1115,52 @@ export class StaveNote extends StemmableNote {
     } = this.getNoteHeadBounds();
 
     // Early out if there are no ledger lines to draw.
-    if (highestLine < 6 && lowestLine > 0) return;
+    if (highestLine < 6 && lowestLine > 0) return [];
 
     const minX = Math.min(displacedX ?? 0, nonDisplacedX ?? 0);
-
-    const drawLedgerLine = (y: number, normal: boolean, displaced: boolean) => {
+    const segments: StaveNoteLedgerLineSegment[] = [];
+    const addLedgerLine = (line: number, normal: boolean, displaced: boolean) => {
       let x;
       if (displaced && normal) x = minX - strokePx;
       else if (normal) x = (nonDisplacedX ?? 0) - strokePx;
       else x = (displacedX ?? 0) - strokePx;
       const ledgerWidth = normal && displaced ? doubleWidth : width;
-
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + ledgerWidth, y);
-      ctx.stroke();
+      const y = stave.getYForNote(line);
+      segments.push({ line, x1: x, y1: y, x2: x + ledgerWidth, y2: y });
     };
+
+    for (let line = 6; line <= highestLine; ++line) {
+      const normal = nonDisplacedX !== undefined && line <= highestNonDisplacedLine;
+      const displaced = highestDisplacedLine !== undefined && line <= highestDisplacedLine;
+      addLedgerLine(line, normal, displaced);
+    }
+
+    for (let line = 0; line >= lowestLine; --line) {
+      const normal = nonDisplacedX !== undefined && line >= lowestNonDisplacedLine;
+      const displaced = lowestDisplacedLine !== undefined && line >= lowestDisplacedLine;
+      addLedgerLine(line, normal, displaced);
+    }
+
+    return segments;
+  }
+
+  // Draw the ledger lines between the stave and the highest/lowest keys
+  drawLedgerLines(): void {
+    const stave = this.checkStave();
+    const ctx = this.checkContext();
+    if (!ctx) {
+      throw new RuntimeError('NoCanvasContext', "Can't draw without a canvas context.");
+    }
 
     const style = { ...stave.getDefaultLedgerLineStyle(), ...this.getLedgerLineStyle() };
     ctx.save();
     this.applyStyle(ctx, style);
 
-    // Draw ledger lines below the staff:
-    for (let line = 6; line <= highestLine; ++line) {
-      const normal = nonDisplacedX !== undefined && line <= highestNonDisplacedLine;
-      const displaced = highestDisplacedLine !== undefined && line <= highestDisplacedLine;
-      drawLedgerLine(stave.getYForNote(line), normal, displaced);
-    }
-
-    // Draw ledger lines above the staff:
-    for (let line = 0; line >= lowestLine; --line) {
-      const normal = nonDisplacedX !== undefined && line >= lowestNonDisplacedLine;
-      const displaced = lowestDisplacedLine !== undefined && line >= lowestDisplacedLine;
-      drawLedgerLine(stave.getYForNote(line), normal, displaced);
+    for (const segment of this.getRenderedLedgerLineSegments()) {
+      ctx.beginPath();
+      ctx.moveTo(segment.x1, segment.y1);
+      ctx.lineTo(segment.x2, segment.y2);
+      ctx.stroke();
     }
 
     ctx.restore();
